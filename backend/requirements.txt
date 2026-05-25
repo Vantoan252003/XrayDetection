@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+torchxrayvision
+torch
+torchvision
+scikit-image
+matplotlib
+numpy
+asyncpg
+boto3
+requests
+python-dotenv
+pillow
+pydicom
