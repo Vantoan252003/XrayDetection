@@ -1,0 +1,5 @@
+pyspark==3.5.0
+boto3
+psycopg2-binary
+pandas
+pyarrow

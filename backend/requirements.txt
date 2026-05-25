@@ -13,3 +13,9 @@ requests
 python-dotenv
 pillow
 pydicom
+# Data Engineering
+aiokafka
+redis
+websockets
+pyarrow
+pandas

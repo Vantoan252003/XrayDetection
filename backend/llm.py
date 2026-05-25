@@ -3,7 +3,7 @@ import requests
 import base64
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-GEMINI_API_KEY = "AIzaSyD7BhWREuzwtca56YRG_AFSnZj0QoGoOSQ"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.5-flash"
 
 SYSTEM_PROMPT = """Bạn là trợ lý hỗ trợ đọc ảnh X-ray. Nhiệm vụ của bạn là:
