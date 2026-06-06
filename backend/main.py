@@ -98,6 +98,11 @@ async def analyze_xray(
     scores = predict(img_tensor)
     is_normal = len(scores) == 0
     top_disease = max(scores, key=scores.get) if scores else None
+    top_score = scores.get(top_disease, 0) if top_disease else 0
+    
+    if top_score <= 0.75:
+        top_disease = None
+        is_normal = True
 
     # Bước 3: Grad-CAM
     heatmap_bytes = generate_heatmap(img_tensor, top_disease) if top_disease else b""

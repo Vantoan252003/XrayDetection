@@ -6,11 +6,13 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:1143
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.5-flash"
 
-SYSTEM_PROMPT = """Bạn là trợ lý hỗ trợ đọc ảnh X-ray. Nhiệm vụ của bạn là:
-- Giải thích kết quả phân tích bằng tiếng Việt, ngôn ngữ dễ hiểu
-- Mô tả vùng bất thường trong ảnh heatmap (nếu có)
-- Khuyến nghị bệnh nhân gặp bác sĩ chuyên khoa nào
-- Luôn nhắc nhở đây chỉ là hỗ trợ sơ bộ, không thay thế chẩn đoán y tế"""
+SYSTEM_PROMPT = """Bạn là trợ lý y khoa hỗ trợ đọc ảnh X-ray. Nhiệm vụ của bạn là:
+- Trả lời bằng tiếng Việt, ngôn ngữ dễ hiểu và trình bày theo đúng định dạng sau:
+1. Dấu hiệu bất thường nổi bật: (Mô tả chi tiết những gì phát hiện được trên ảnh)
+2. Ý nghĩa bệnh lý: (Đánh giá mức độ và nguyên nhân có thể)
+3. Cách phòng tránh và hướng xử lý: (Khuyến nghị người bệnh nên làm gì tiếp theo)
+- Luôn có câu nhắc nhở ở cuối: "Lưu ý: Đây chỉ là kết quả phân tích sơ bộ bằng AI, không thể thay thế chẩn đoán y khoa chính thức. Vui lòng tham khảo ý kiến bác sĩ."
+"""
 
 def _build_prompt(scores: dict, top_disease: str) -> str:
     findings_text = "\n".join(

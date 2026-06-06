@@ -16,7 +16,7 @@ async def get_overview(pool) -> dict:
             COUNT(*) as total_scans,
             COUNT(*) FILTER (WHERE is_normal = true) as normal_scans,
             COUNT(*) FILTER (WHERE is_normal = false) as abnormal_scans,
-            COALESCE(AVG(processing_time_ms), 0) as avg_processing_ms,
+            COALESCE(AVG(processing_time_ms)::float, 0) as avg_processing_ms,
             COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as scans_24h,
             COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as scans_1h,
             COUNT(DISTINCT patient_id) as unique_patients
@@ -31,7 +31,7 @@ async def get_disease_distribution(pool) -> list[dict]:
         SELECT
             top_disease as disease,
             COUNT(*) as count,
-            ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER(), 0), 1) as percentage
+            ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER(), 0), 1)::float as percentage
         FROM scans
         WHERE top_disease IS NOT NULL
         GROUP BY top_disease
@@ -90,12 +90,12 @@ async def get_processing_time_stats(pool) -> dict:
     """Get processing time statistics."""
     row = await pool.fetchrow("""
         SELECT
-            COALESCE(AVG(processing_time_ms), 0) as avg_ms,
-            COALESCE(MIN(processing_time_ms), 0) as min_ms,
-            COALESCE(MAX(processing_time_ms), 0) as max_ms,
-            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY processing_time_ms), 0) as p50_ms,
-            COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY processing_time_ms), 0) as p95_ms,
-            COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY processing_time_ms), 0) as p99_ms
+            COALESCE(AVG(processing_time_ms)::float, 0) as avg_ms,
+            COALESCE(MIN(processing_time_ms)::int, 0) as min_ms,
+            COALESCE(MAX(processing_time_ms)::int, 0) as max_ms,
+            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY processing_time_ms)::float, 0) as p50_ms,
+            COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY processing_time_ms)::float, 0) as p95_ms,
+            COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY processing_time_ms)::float, 0) as p99_ms
         FROM scans
         WHERE processing_time_ms > 0
     """)
