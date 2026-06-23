@@ -1,6 +1,7 @@
 "use client";
 
 import { translateDisease } from "@/utils/disease";
+import ImageSlider from "@/components/ImageSlider";
 import { useState, useRef } from "react";
 import {
   UploadCloud, Loader2, AlertCircle,
@@ -180,16 +181,20 @@ export default function XRayUploader() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Image */}
             <div className="chart-card p-3">
-              <div className="aspect-square rounded-xl overflow-hidden"
-                style={{ background: "#f8fafc" }}>
-                <img
-                  src={result.heatmap_url || result.image_url}
-                  alt="Kết quả"
-                  className="w-full h-full object-contain"
-                />
-              </div>
+              {result.heatmap_url ? (
+                <ImageSlider originalUrl={result.image_url} heatmapUrl={result.heatmap_url} />
+              ) : (
+                <div className="aspect-square rounded-xl overflow-hidden"
+                  style={{ background: "#f8fafc" }}>
+                  <img
+                    src={result.image_url}
+                    alt="Ảnh X-quang gốc"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              )}
               <p className="text-center text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-                {result.heatmap_url ? "Bản đồ nhiệt Grad-CAM — vùng đỏ = AI chú ý nhất" : "Ảnh X-quang gốc"}
+                {result.heatmap_url ? "Kéo thanh trượt để so sánh ảnh gốc và bản đồ nhiệt Grad-CAM" : "Ảnh X-quang gốc"}
               </p>
             </div>
 

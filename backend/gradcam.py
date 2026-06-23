@@ -16,7 +16,7 @@ def predict(img_tensor: torch.Tensor) -> dict:
     # Lọc bệnh có confidence cao
     return {k: round(v, 3) for k, v in scores.items() if v > THRESHOLD}
 
-def generate_heatmap(img_tensor: torch.Tensor, disease: str) -> bytes:
+def generate_heatmap(img_tensor: torch.Tensor, disease: str, original_image_bytes: bytes) -> bytes:
     try:
         disease_idx = model.pathologies.index(disease)
     except ValueError:
@@ -85,15 +85,31 @@ def generate_heatmap(img_tensor: torch.Tensor, disease: str) -> bytes:
     cam = cam - cam.min()
     cam = cam / (cam.max() + 1e-8)
     
+    import skimage.io
+    try:
+        orig_img = skimage.io.imread(io.BytesIO(original_image_bytes))
+        h, w = orig_img.shape[:2]
+    except Exception:
+        orig_img = img_tensor[0, 0].detach().numpy()
+        orig_img = (orig_img - orig_img.min()) / (orig_img.max() - orig_img.min() + 1e-8)
+        h, w = 224, 224
+
     cam = cam.unsqueeze(0).unsqueeze(0)
-    cam = F.interpolate(cam, size=(224, 224), mode='bilinear', align_corners=False)
+    cam = F.interpolate(cam, size=(h, w), mode='bilinear', align_corners=False)
     heatmap = cam.squeeze().numpy()
 
-    img_np = img_tensor[0, 0].detach().numpy()
-    img_norm = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
+    # Calculate figure size to match original aspect ratio (max dimension 5 inches)
+    if w > h:
+        fig_w = 5.0
+        fig_h = 5.0 * (h / w)
+    else:
+        fig_h = 5.0
+        fig_w = 5.0 * (w / h)
 
-    fig, ax = plt.subplots(figsize=(5, 5))
-    ax.imshow(img_norm, cmap="gray")
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    
+    ax.imshow(orig_img, cmap="gray")
     ax.imshow(heatmap, alpha=0.45, cmap="jet")
     ax.axis("off")
 

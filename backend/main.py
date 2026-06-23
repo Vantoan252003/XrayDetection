@@ -105,7 +105,7 @@ async def analyze_xray(
         is_normal = True
 
     # Bước 3: Grad-CAM
-    heatmap_bytes = generate_heatmap(img_tensor, top_disease) if top_disease else b""
+    heatmap_bytes = generate_heatmap(img_tensor, top_disease, file_bytes) if top_disease else b""
 
     # Bước 4: Upload ảnh gốc + heatmap lên MinIO
     image_key = f"originals/{scan_id}.jpg"
