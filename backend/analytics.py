@@ -129,7 +129,7 @@ async def get_daily_analytics(pool, days: int = 30) -> list[dict]:
     rows = await pool.fetch("""
         SELECT *
         FROM analytics_daily
-        WHERE day_bucket > CURRENT_DATE - $1
+        WHERE day_bucket > CURRENT_DATE - $1::integer
         ORDER BY day_bucket ASC
     """, days)
     result = []

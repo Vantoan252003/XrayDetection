@@ -7,7 +7,7 @@ import torch
 import torchxrayvision as xrv
 from xray_model import model
 
-THRESHOLD = 0.4   # chỉ report bệnh có confidence > 40%
+THRESHOLD = 0.75  # chỉ report bệnh có confidence > 75%
 
 def predict(img_tensor: torch.Tensor) -> dict:
     with torch.no_grad():

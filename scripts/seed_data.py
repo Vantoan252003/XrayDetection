@@ -219,21 +219,21 @@ async def seed():
     await pool.execute("""
         INSERT INTO analytics_daily (day_bucket, total_scans, normal_scans, abnormal_scans, avg_processing_ms, disease_counts, source_counts, top_disease)
         SELECT
-            created_at::date as day_bucket,
+            day_bucket,
             COUNT(*) as total_scans,
             COUNT(*) FILTER (WHERE is_normal = true) as normal_scans,
             COUNT(*) FILTER (WHERE is_normal = false) as abnormal_scans,
             AVG(processing_time_ms) as avg_processing_ms,
             jsonb_object_agg(COALESCE(top_disease, 'Normal'), disease_count) as disease_counts,
             jsonb_object_agg(COALESCE(source, 'web'), source_count) as source_counts,
-            (SELECT top_disease FROM scans s2 WHERE s2.created_at::date = scans.created_at::date AND top_disease IS NOT NULL GROUP BY top_disease ORDER BY COUNT(*) DESC LIMIT 1) as top_disease
+            (SELECT top_disease FROM scans s2 WHERE s2.created_at::date = day_bucket AND top_disease IS NOT NULL GROUP BY top_disease ORDER BY COUNT(*) DESC LIMIT 1) as top_disease
         FROM (
-            SELECT created_at, is_normal, top_disease, processing_time_ms, source,
+            SELECT created_at::date as day_bucket, is_normal, top_disease, processing_time_ms, source,
                    COUNT(*) OVER (PARTITION BY created_at::date, top_disease) as disease_count,
                    COUNT(*) OVER (PARTITION BY created_at::date, source) as source_count
             FROM scans
-        ) scans
-        GROUP BY created_at::date
+        ) sub
+        GROUP BY day_bucket
         ON CONFLICT (day_bucket) DO UPDATE SET
             total_scans = EXCLUDED.total_scans,
             normal_scans = EXCLUDED.normal_scans,
