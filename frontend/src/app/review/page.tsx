@@ -506,37 +506,38 @@ export default function ReviewPage() {
                       .filter(([, score]) => score > 0.4)
                       .sort(([, a], [, b]) => b - a)
                       .map(([disease, score]) => {
-                        // Bác sĩ đã bỏ tích bệnh này nếu verifiedLabels[disease] === false hoặc undefined
+                        // Bác sĩ đã bỏ tích hoặc không tích bệnh này
                         const doctorApproved = verifiedLabels[disease] === true;
-                        const doctorRejected = verifiedLabels[disease] === false;
-                        // Chỉ áp dụng gạch ngang ở tab đã xác nhận (khi đã có quyết định)
-                        const showStrike = activeTab === "reviewed" && doctorRejected;
-                        const isUnchecked = activeTab === "reviewed" && !doctorApproved;
+                        // Áp dụng gạch ngang và giảm độ mờ khi bác sĩ không chọn bệnh lý này
+                        const showStrike = !doctorApproved;
+                        const isUnchecked = !doctorApproved;
                         return (
-                          <div key={disease} className="text-xs">
+                          <div key={disease} className="text-xs animate-fadeIn">
                             <div className="flex justify-between font-semibold mb-0.5">
                               <span style={{
                                 color: showStrike ? "var(--text-muted)" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-600)" : "var(--text-secondary)",
                                 textDecoration: showStrike ? "line-through" : "none",
-                                opacity: isUnchecked && activeTab === "reviewed" ? 0.5 : 1,
+                                opacity: isUnchecked ? 0.5 : 1,
                               }}>
                                 {showStrike && "✗ "}{translateDisease(disease)}
                                 {doctorApproved && activeTab === "reviewed" && " ✓"}
                               </span>
                               <span style={{
                                 color: showStrike ? "var(--text-muted)" : "var(--indigo-600)",
-                                opacity: isUnchecked && activeTab === "reviewed" ? 0.4 : 1,
+                                opacity: isUnchecked ? 0.4 : 1,
                               }}>{(score * 100).toFixed(1)}%</span>
                             </div>
                             <div className="progress-bar">
                               <div className="progress-bar-fill" style={{
                                 width: `${score * 100}%`,
-                                background: showStrike ? "#d1d5db" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-500)" : score > 0.75 ? "var(--rose-500)" : "var(--indigo-500)",
-                                opacity: isUnchecked && activeTab === "reviewed" ? 0.3 : 1,
+                                background: showStrike ? "#cbd5e1" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-500)" : score > 0.75 ? "var(--rose-500)" : "var(--indigo-500)",
+                                opacity: isUnchecked ? 0.3 : 1,
                               }} />
                             </div>
                             {showStrike && (
-                              <p className="text-[10px] text-slate-400 mt-0.5 italic">Bác sĩ xác nhận: Không phải bệnh này</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5 italic">
+                                {activeTab === "reviewed" ? "Bác sĩ xác nhận: Không phải bệnh này" : "Chưa xác nhận bệnh này"}
+                              </p>
                             )}
                           </div>
                         );
