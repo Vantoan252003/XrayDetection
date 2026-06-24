@@ -54,38 +54,44 @@ def _explain_with_ollama(prompt: str, model_name: str, heatmap_bytes: bytes) -> 
 
 
 def _explain_with_gemini(prompt: str, heatmap_bytes: bytes) -> str:
-    """Gọi Gemini 2.5 Flash qua REST API của Google."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    """Gọi Gemini qua REST API của Google (thử 2.5 Flash trước, fallback sang 1.5 Flash)."""
+    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    last_err = None
 
-    parts = []
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        parts = []
 
-    # Thêm ảnh heatmap nếu có
-    if heatmap_bytes:
-        heatmap_b64 = base64.b64encode(heatmap_bytes).decode('utf-8')
-        parts.append({
-            "inline_data": {
-                "mime_type": "image/png",
-                "data": heatmap_b64
-            }
-        })
+        # Thêm ảnh heatmap nếu có
+        if heatmap_bytes:
+            heatmap_b64 = base64.b64encode(heatmap_bytes).decode('utf-8')
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": heatmap_b64
+                }
+            })
 
-    parts.append({"text": prompt})
+        parts.append({"text": prompt})
+        payload = {
+            "contents": [{
+                "parts": parts
+            }]
+        }
 
-    payload = {
-        "contents": [{
-            "parts": parts
-        }]
-    }
+        try:
+            logger.info(f"Trying to call Gemini API with model: {model}...")
+            response = requests.post(url, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            logger.warning(f"Error calling {model} API: {e}")
+            last_err = e
 
-    response = requests.post(url, json=payload, timeout=60)
-    response.raise_for_status()
-    
-    data = response.json()
-    # Parse Gemini response format
-    try:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        return f"Phản hồi không hợp lệ từ Gemini: {data}"
+    if last_err:
+        raise last_err
+    return "Không thể tạo lời giải thích bằng Gemini."
 
 
 def explain_results(scores: dict, heatmap_bytes: bytes, top_disease: str, ai_model: str = "gemini") -> str:
