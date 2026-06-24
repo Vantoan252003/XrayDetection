@@ -1,258 +1,195 @@
-# TÀI LIỆU TỔNG QUAN HỆ THỐNG X-RAY DIAGNOSIS PIPELINE (DATA ENGINEERING PLATFORM)
+# TÀI LIỆU TỔNG QUAN HỆ THỐNG X-RAY DIAGNOSIS & MODEL CYCLING PLATFORM
 
-Tài liệu này mô tả chi tiết kiến trúc, các công nghệ sử dụng, cấu trúc thư mục, luồng hoạt động dữ liệu thời gian thực và cách thức vận hành hệ thống **X-Ray Diagnosis Pipeline**.
+Tài liệu này mô tả chi tiết kiến trúc vi dịch vụ (Microservices), các công nghệ sử dụng, luồng hoạt động chẩn đoán thời gian thực, chu trình quản lý vòng đời mô hình học máy (MLOps Model Cycling), thiết kế cơ sở dữ liệu và cách thức vận hành hệ thống.
 
 ---
 
 ## 1. Công Nghệ Sử Dụng (Technology Stack)
 
-Hệ thống là một nền tảng Data Engineering hiệu năng cao kết hợp Deep Learning và GenAI để xử lý và phân tích ảnh y khoa với các thành phần chính:
+Hệ thống được xây dựng như một nền tảng dữ liệu y khoa hiệu năng cao kết hợp giữa trí tuệ nhân tạo (Deep Learning & LLM), MLOps, xử lý dữ liệu lớn thời gian thực và kiến trúc hướng sự kiện:
 
 | Thành phần | Công nghệ | Vai trò & Mô tả |
 | :--- | :--- | :--- |
-| **Giao diện (Frontend)** | Next.js 14, React, TailwindCSS | Dashboard thời gian thực, hiển thị biểu đồ xu hướng bệnh, báo cáo Spark, và giao diện tải ảnh chẩn đoán. |
-| **API Server (Backend)** | FastAPI (Python 3.11+) | Cung cấp RESTful APIs cho client, kết nối WebSocket và điều phối toàn bộ pipeline bất đồng bộ. |
-| **AI Inference Model** | TorchXRayVision (DenseNet121) | Mô hình Deep Learning nhận dạng 18 loại bệnh lý phổi từ ảnh chụp X-quang ngực. |
-| **Bản đồ nhiệt** | Grad-CAM | Trích xuất gradient từ lớp tích chập cuối cùng để sinh ảnh heatmap (vùng màu đỏ nghi ngờ tổn thương). |
-| **Trí tuệ nhân tạo (LLM)** | Gemini 2.5 Flash / LLaVA Local | Phân tích điểm bệnh lý và ảnh heatmap để xuất báo cáo y khoa tự động bằng tiếng Việt. |
-| **Message Broker** | Apache Kafka & Zookeeper | Quản lý luồng sự kiện xử lý ảnh (`scan-events`) một cách bất đồng bộ và tin cậy. |
-| **Big Data Engine** | Apache Spark (Structured Streaming & Batch) | Xử lý phân tích luồng sự kiện từ Kafka và thực hiện các job batch thống kê xu hướng dài hạn từ PostgreSQL. |
-| **Cơ sở dữ liệu** | PostgreSQL 16 | Lưu trữ dữ liệu hồ sơ quét, nhật ký sự kiện Kafka và các chỉ số phân tích tổng hợp (hourly/daily). |
-| **Lưu trữ đối tượng** | MinIO (S3-compatible Object Storage) | Lưu trữ vĩnh viễn tệp tin ảnh chụp gốc (JPG) và ảnh bản đồ nhiệt Grad-CAM (PNG). |
-| **Bộ nhớ đệm** | Redis 7 | Quản lý trạng thái kết nối và hỗ trợ cơ chế giám sát sức khỏe (System Health). |
-| **Containerization** | Docker & Docker Compose | Đóng gói toàn bộ 11 dịch vụ giúp triển khai đồng bộ bằng 1 lệnh duy nhất. |
+| **Giao diện (Frontend)** | Next.js 14, React, TailwindCSS | Dashboard giám sát thời gian thực, Live Feed sự kiện, Analytics chuyên sâu, giao diện Bác sĩ phê duyệt (Review) và Sổ quản lý mô hình (Models). |
+| **API Server (Backend)** | FastAPI (Python 3.11+) | Cung cấp RESTful APIs cho client, kết nối WebSocket đẩy tin trực tiếp, lưu trữ ảnh gốc/Grad-CAM proxy. |
+| **Phân tích X-quang (AI)** | TorchXRayVision (DenseNet121) | Trích xuất dự đoán 18 loại bệnh lý từ ảnh X-quang ngực thẳng. |
+| **Bản đồ giải thích** | Grad-CAM++ | Trích xuất vùng nóng tổn thương từ lớp BatchNorm cuối cùng `norm5` giúp chẩn đoán trực quan (XAI). |
+| **GenAI Giải thích** | Gemini API (Fallback 1.5/2.5) | Gọi Google Generative Language API (hoặc Ollama local) phân tích điểm số và heatmap để xuất lời giải thích bằng Tiếng Việt. |
+| **Hệ thống hàng đợi** | Apache Kafka & Zookeeper | Broker luồng chẩn đoán thời gian thực (`scan-events`), truyền thông tin bất đồng bộ tin cậy. |
+| **Phân tích lớn** | Apache Spark (Streaming & Batch) | Phân tích dòng dữ liệu từ Kafka (Streaming) và chạy các job tổng hợp dữ liệu lịch sử lưu trữ lâu dài dưới dạng Parquet. |
+| **Cơ sở dữ liệu** | PostgreSQL 16 | Lưu trữ hồ sơ chẩn đoán, dữ liệu hàng đợi huấn luyện, tổng hợp thống kê theo giờ/ngày thông qua PL/pgSQL. |
+| **Bộ nhớ đệm** | Redis 7 | Caching, duy trì trạng thái kết nối WebSocket và cơ chế System Health. |
+| **Lưu trữ đối tượng** | MinIO (S3-compatible Storage) | Bucket chứa ảnh chụp y khoa gốc (`xray-images`), heatmap (`xray-heatmaps`), tệp Parquet (`xray-data`) và model registry (`xray-models`). |
+| **Theo dõi Mô hình** | MLflow Server | Sổ đăng ký phiên bản mô hình (Model Registry), theo dõi log tham số và lưu vết metrics (AUC). |
+| **Workflow Scheduler** | Apache Airflow | Tự động hóa lịch biểu huấn luyện lại mô hình hàng tuần (gom dữ liệu từ DB, trigger train, update checkpoint). |
+| **Containerization** | Docker & Docker Compose | Đóng gói toàn bộ 11 dịch vụ chạy độc lập, vận hành phân tán. |
 
 ---
 
-## 2. Luồng Hoạt Động Của Dữ Liệu (Data Pipeline Flow)
+## 2. Luồng Hoạt Động Của Hệ Thống (Platform Pipelines)
 
-Luồng xử lý từ lúc người dùng tải lên một ảnh X-quang đến khi xuất hiện trên giao diện Analytics diễn ra qua hai pha chính:
+Hệ thống vận hành trơn tru dựa trên sự kết hợp chặt chẽ giữa 3 chu kỳ dữ liệu chính:
 
-```
-[Người dùng tải ảnh] ────> FastAPI Backend (Inference & Grad-CAM & LLM)
-                               │          │
-                     MinIO (S3)◄┘          └─► PostgreSQL (Lưu scan gốc)
-                                                 │
-                                           Gửi sự kiện scan.completed
-                                                 │
-                                                 ▼
-[Dashboard Next.js] ◄── WebSocket ◄── Kafka Consumer ◄── Apache Kafka (Broker)
-                                                             │
-                                   me                           ▼
-                                                    Apache Spark (Streaming)
-                                                             │
-                                                             ▼
-                                                    MinIO (Parquet Output)
-```
-
-### Bước 1: Tiếp nhận và Chẩn đoán (FastAPI)
-1. Bác sĩ/Người dùng tải ảnh X-quang lên giao diện Next.js, ảnh được gửi qua HTTP POST tới `/analyze`.
-2. Backend FastAPI ghi nhận yêu cầu và gửi sự kiện `scan.submitted` rồi `scan.processing` vào Kafka.
-3. Ảnh được tiền xử lý (resize $224 \times 224$, grayscale, chuẩn hóa $[-1024, 1024]$) và đưa qua mô hình **DenseNet121** để dự đoán xác suất 18 loại bệnh lý.
-4. Nếu phát hiện bệnh lý có điểm số cao nhất $> 75\%$:
-   - Kích hoạt **Grad-CAM** để vẽ bản đồ nhiệt tổn thương.
-   - Chồng ảnh bản đồ nhiệt (heatmap overlay) lên ảnh gốc.
-5. Ảnh gốc và ảnh heatmap được lưu lên **MinIO Object Storage**.
-6. Gửi điểm số dự đoán cùng ảnh heatmap sang **Gemini API** (hoặc LLaVA local) để sinh báo cáo chẩn đoán chi tiết bằng tiếng Việt.
-7. Lưu thông tin đầy đủ của ca quét (điểm số, khóa lưu trữ, kết quả chẩn đoán) vào **PostgreSQL**.
-8. Gửi sự kiện `scan.completed` vào **Apache Kafka**.
-
-### Bước 2: Đồng bộ Thời gian thực (Kafka -> WebSocket -> Dashboard)
-1. **Kafka Consumer** chạy nền của backend tiêu thụ sự kiện `scan.completed` từ topic `scan-events`.
-2. Consumer gọi hàm SQL (Stored Procedure) `upsert_hourly_analytics` và `upsert_daily_analytics` trong PostgreSQL để cộng dồn số ca, tính lại thời gian xử lý trung bình và cập nhật cơ cấu bệnh lý tức thời.
-3. Đồng thời gửi gói tin cập nhật qua **WebSocket** để đẩy trực tiếp lên giao diện Dashboard Next.js (bảng cập nhật Live Feed, chỉ số KPI mà không cần F5 trang).
-
-### Bước 3: Phân Tích Dữ Liệu Lớn (Apache Spark)
-1. **Spark Structured Streaming** (`spark/streaming_job.py`):
-   - Đọc trực tiếp dòng sự kiện từ Kafka topic `scan-events`.
-   - Áp dụng cửa sổ thời gian 5 phút (Tumbling Window) kèm cơ chế Watermark để gom nhóm, đếm số ca bình thường/bất thường và tính thời gian xử lý trung bình.
-   - Xuất dữ liệu tổng hợp ra định dạng **Parquet** nén lưu tại MinIO (`s3a://xray-data/spark-output/streaming_windows`).
-2. **Spark Batch Job** (`spark/analytics_job.py`):
-   - Chạy định kỳ để đọc toàn bộ dữ liệu lịch sử từ PostgreSQL qua JDBC.
-   - Tính toán 6 chiều phân tích sâu: xu hướng theo ngày, tần suất bệnh lý, giờ cao điểm của bệnh viện, xu hướng theo tuần, nguồn gửi và phân phối hiệu năng xử lý.
-   - Xuất báo cáo kết quả ra thư mục Parquet trên MinIO phục vụ lưu trữ lâu dài.
+### 2.1. Chu kỳ Chẩn đoán Thời gian thực (Real-time Diagnosis)
+1. **Tải ảnh lên**: Bác sĩ tải ảnh chụp X-quang lên giao diện Next.js, ảnh được gửi đến FastAPI `/analyze`.
+2. **AI Inference & Grad-CAM++**: 
+   - Backend chuẩn hóa ảnh đầu vào và dự đoán xác suất qua mô hình DenseNet121.
+   - Nếu phát hiện bệnh lý có xác suất $> 75\%$, thuật toán **Grad-CAM++** tự động sinh bản đồ nhiệt (heatmap overlay) khoanh vùng nghi ngờ tổn thương.
+3. **Gọi AI Giải thích**: Điểm số và ảnh heatmap được gửi đến **Gemini API** để tự động biên soạn báo cáo giải thích tiếng Việt. *Hệ thống tích hợp cơ chế tự động chuyển vùng mô hình (fallback) từ `gemini-2.5-flash` sang `gemini-1.5-flash` hoặc `gemini-3.1-flash-lite` khi gặp lỗi quá tải 503 để duy trì kết nối.*
+4. **Lưu trữ**: Ảnh gốc và heatmap được lưu trên MinIO S3. Kết quả chẩn đoán lưu vào PostgreSQL.
+5. **Gửi tin realtime**: Gửi sự kiện chẩn đoán thành công vào Kafka topic `scan-events`. 
+6. **Live Feed & Analytics**: Kafka Consumer nhận sự kiện, tự động gọi các stored procedure trong PostgreSQL để cộng dồn thống kê KPI đồng thời đẩy gói tin qua WebSocket cập nhật tức thời lên Dashboard.
+7. **Spark Streaming**: Spark đọc liên tục luồng Kafka, thực hiện tổng hợp ca bệnh theo cửa sổ thời gian 5 phút và ghi tệp Parquet nén lên MinIO phục vụ phân tích lâu dài.
 
 ---
 
-## 3. Cấu Trúc Mã Nguồn Dự Án
+### 2.2. Chu kỳ Phê duyệt của Bác sĩ (Doctor Review Loop)
+Hệ thống cho phép bác sĩ lâm sàng kiểm tra, gắn nhãn chính xác và đẩy dữ liệu chẩn đoán chất lượng cao vào tập huấn luyện tiếp theo:
+1. **Tabs làm việc**: 
+   - **Chưa xác nhận**: Hiển thị các ca quét chẩn đoán ban đầu. AI tự động tích sẵn các bệnh lý có xác suất $> 60\%$.
+   - **Đã xác nhận**: Hiển thị các ca quét bác sĩ đã hoàn tất phê duyệt.
+2. **Giao diện phản hồi trực quan (Strikethrough)**: Khi bác sĩ bỏ tích (loại trừ) một phán đoán của AI ở bất kỳ tab nào, tên bệnh lý đó trong bảng "Phán đoán của AI" sẽ lập tức hiển thị **gạch ngang** kèm dấu `✗` và thanh tiến trình chuyển sang màu xám để phản hồi trực quan trực tiếp.
+3. **Phê duyệt hàng loạt**: Nút "Xác nhận toàn bộ" cho phép phê duyệt hàng loạt các ca chờ duyệt dựa trên chẩn đoán ban đầu của AI ($>60\%$) để tối ưu thời gian.
+4. **Lưu trữ hàng đợi huấn luyện (Upsert)**: Khi bác sĩ bấm "Xác nhận kết quả", dữ liệu nhãn thực tế được lưu vào bảng `labeled_scans` với trạng thái `approved`. Hệ thống tự động thực hiện cơ chế **Upsert** (nếu ca quét đã duyệt trước đó được sửa lại, bản ghi cũ sẽ được cập nhật thay vì tạo dòng mới trùng lặp).
+5. **Image Proxy**: Thay vì sinh URL presigned nhạy cảm của MinIO (thường bị lỗi DNS loopback và CORS trên máy khách), backend cung cấp một endpoint proxy trung gian (`/images/{key}`) giúp trình duyệt tải ảnh trực tiếp, mượt mà và bảo mật.
+
+---
+
+### 2.3. Chu kỳ Huấn luyện & Cập nhật Mô hình (MLOps Model Cycling)
+Khi bác sĩ chẩn đoán tích lũy đủ dữ liệu y khoa thực tế, chu trình cập nhật mô hình được kích hoạt:
+1. **Kích hoạt Train Job**:
+   - Người dùng bấm "Huấn luyện mô hình" từ trang Review hoặc Models.
+   - Giao diện cung cấp dropdown cho phép chọn **Mô hình nền (Base Model)**: Huấn luyện lại hoàn toàn từ đầu (mô hình DenseNet121 mặc định của TorchXRayVision) hoặc tải tệp trọng số checkpoint (`model_v{version}.pt`) của một phiên bản mô hình cụ thể trong Registry để **huấn luyện tiếp tục (incremental fine-tuning)**.
+   - Backend khởi chạy pipeline huấn luyện PyTorch độc lập (ở chế độ LOCAL bảo mật thông tin nội bộ).
+2. **Đăng ký MLflow & Đồng bộ Baseline AUC**:
+   - Khi huấn luyện kết thúc, mô hình mới được log vào **MLflow Registry** ở trạng thái **Chờ duyệt (Staging)**.
+   - Do lượng dữ liệu mẫu ban đầu nhỏ dễ dẫn đến tính toán AUC bị `NaN` và bị ẩn, backend áp dụng cơ chế tự động **trộn và điền baseline AUC mặc định (DEFAULT_PRETRAINED_METRICS)** dựa trên hiệu năng chuẩn của DenseNet121 pre-trained (trung bình 81.3% AUC trên 19 bệnh lý).
+   - Mô hình có bệnh lý được fine-tune thực tế sẽ tự động ghi đè và tính toán lại AUC trung bình tương ứng.
+3. **Quy trình Promote nâng cấp**:
+   - Trên trang Models, khi bấm "Đưa vào Production" cho bản Staging, một modal overlay cao cấp sẽ hiển thị so sánh trực quan hiệu suất:
+     - So sánh AUC trung bình tổng thể giữa mô hình Staging và mô hình Production hiện tại.
+     - Liệt kê bảng so sánh AUC chi tiết của từng bệnh lý và tính phần trăm tăng/giảm tương quan (ví dụ: `+2%` màu xanh lá hoặc `-1%` màu đỏ).
+   - Bác sĩ bấm "Xác nhận nâng cấp", MLflow sẽ chuyển stage phiên bản đó thành **Production**, đồng thời ModelManager của API chẩn đoán sẽ tự động kích hoạt **tải nóng tệp trọng số mới về bộ nhớ đệm** để phục vụ trực tiếp các ca quét tiếp theo ngay lập tức (không cần dừng hay khởi động lại backend).
+
+---
+
+## 3. Cấu Trúc Mã Nguồn Monorepo
 
 ```
 XRayDetection/
-├── backend/                   # FastAPI Backend
-│   ├── main.py                # Router API, WebSocket & Lifespan điều phối Consumer
-│   ├── xray_model.py          # Singleton tải model DenseNet121
-│   ├── gradcam.py             # Logic sinh bản đồ nhiệt Grad-CAM
-│   ├── llm.py                 # Tương tác với Gemini API / LLaVA Local
-│   ├── database.py            # Kết nối PostgreSQL (asyncpg pool)
-│   ├── storage.py             # Tương tác MinIO (S3 SDK)
-│   ├── kafka_producer.py      # Đăng ký và gửi sự kiện vào Kafka
-│   ├── kafka_consumer.py      # Nhận sự kiện Kafka -> Lưu DB & bắn WebSocket
-│   └── analytics.py           # Truy vấn dữ liệu thống kê từ PostgreSQL
-├── frontend/                  # Next.js 14 Frontend
+├── backend/                   # FastAPI Backend Service
+│   ├── main.py                # API Gateway, WebSocket điều phối
+│   ├── xray_model.py          # ModelManager tải nóng trọng số mô hình
+│   ├── gradcam.py             # Sinh heatmap Grad-CAM++ & tự động vẽ bounding box
+│   ├── llm.py                 # Sinh lời giải thích Gemini (Fallback 1.5/2.5)
+│   ├── database.py            # Asyncpg pool quản lý kết nối PostgreSQL
+│   ├── storage.py             # SDK tương tác với kho lưu trữ đối tượng MinIO
+│   ├── routers/               # Routers logic: batch, review, training
+│   └── services/              # Nghiệp vụ: inference, label_service, model_registry, training_service
+├── frontend/                  # Next.js 14 Frontend Service (React + Tailwind)
 │   └── src/
-│       ├── app/               # Routes: dashboard, upload, analytics, reports
-│       ├── components/        # Biểu đồ xu hướng, Uploader, System Health
-│       ├── hooks/             # useWebSocket, useAnalytics kết nối API
-│       └── utils/             # Tiện ích dùng chung (translateDisease...)
-├── spark/                     # Apache Spark Engine
-│   ├── analytics_job.py       # Batch Job phân tích sâu dữ liệu lịch sử
-│   └── streaming_job.py       # Streaming Job xử lý luồng sự kiện Kafka realtime
-├── db/                        # Cơ sở dữ liệu SQL
-│   ├── init.sql               # Schema, stored procedures & indices
-│   └── backfill.sql           # Dữ liệu mẫu khởi tạo ban đầu
-├── scripts/                   # Scripts quản trị
-│   └── seed_data.py           # Sinh 12,000 ca quét mẫu thực tế
-└── docker-compose.yml         # File Docker Compose liên kết 11 dịch vụ
+│       ├── app/               # Routes: dashboard, upload, analytics, models, review
+│       ├── components/        # ImageSlider, DiseaseCheckbox, TrainingStatus, TimeSeriesChart
+│       └── utils/             # Hàm tiện ích (translateDisease...)
+├── spark/                     # Apache Spark Engine (Structured Streaming & Batch analysis)
+│   ├── streaming_job.py       # Phân tích luồng Kafka realtime -> ghi Parquet nén S3
+│   └── analytics_job.py       # Batch job phân tích 6 chiều dữ liệu lịch sử PostgreSQL
+├── airflow/                   # Apache Airflow Orchestration
+│   ├── dags/                  # Dags: review_timeout_dag.py, weekly_training_dag.py
+│   └── Dockerfile             # Cấu hình cài đặt môi trường chạy DAG
+├── db/                        # Cơ sở dữ liệu PostgreSQL 16
+│   ├── init.sql               # Định nghĩa schema bảng, stored procedure PL/pgSQL
+│   └── migrations/            # Quản lý lịch sử nâng cấp schema DB (ví dụ: bảng labeled_scans)
+└── docker-compose.yml         # File compose liên kết, cấu hình cổng mạng cho 11 dịch vụ
 ```
 
 ---
 
-## 4. Hướng Dẫn Vận Hành Hệ Thống
+## 4. Thiết Kế Cơ Sở Dữ Liệu Chi Tiết (PostgreSQL 16)
 
-### 1. Khởi động toàn bộ 11 container
-```bash
-docker compose up --build -d
+```mermaid
+erDiagram
+    scans {
+        uuid id PK
+        timestamptz created_at
+        text image_key
+        text heatmap_key
+        text top_disease
+        jsonb scores
+        boolean is_normal
+        text explanation
+        text patient_id
+        integer processing_time_ms
+        text source
+        text review_status
+        timestamptz review_deadline
+        text ai_model_version
+    }
+    labeled_scans {
+        uuid id PK
+        uuid scan_id FK
+        text image_key
+        jsonb verified_labels
+        text review_status
+        text reviewed_by
+        timestamptz reviewed_at
+        timestamptz created_at
+        boolean added_to_training
+    }
+    scan_events {
+        bigint id PK
+        uuid scan_id FK
+        text event_type
+        jsonb event_data
+        bigint kafka_offset
+        integer kafka_partition
+    }
+    analytics_hourly {
+        timestamp hour_bucket PK
+        integer total_scans
+        integer normal_scans
+        integer abnormal_scans
+        double avg_processing_ms
+        jsonb disease_counts
+        jsonb source_counts
+    }
+    analytics_daily {
+        date day_bucket PK
+        integer total_scans
+        integer normal_scans
+        integer abnormal_scans
+        double avg_processing_ms
+        jsonb disease_counts
+        jsonb source_counts
+    }
+    spark_reports {
+        text report_type PK
+        jsonb report_data
+        text minio_path
+        timestamptz updated_at
+    }
+
+    scans ||--o| labeled_scans : "has label"
+    scans ||--o{ scan_events : "tracks lifecycle"
 ```
 
-### 2. Nạp dữ liệu mẫu (12,000 hồ sơ bệnh án)
-Tập lệnh này sẽ sinh 12,000 ca quét X-quang giả lập chuẩn y tế phân bố trong 30 ngày qua và tự động tính toán dữ liệu tổng hợp theo ngày/giờ:
-```bash
-docker compose run --rm -v $(pwd)/scripts:/app/scripts backend python scripts/seed_data.py
-```
-
-### 3. Chạy phân tích Spark Batch Job
-Khởi chạy tiến trình Spark tổng hợp dữ liệu quy mô lớn và lưu trữ dạng Parquet lên MinIO S3:
-```bash
-docker compose exec spark-master /opt/spark/bin/spark-submit \
-  --conf spark.jars.ivy=/tmp/.ivy \
-  --packages org.postgresql:postgresql:42.7.1,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
-  /opt/spark-apps/analytics_job.py
-```
-
-### 4. Địa chỉ truy cập mặc định trên Localhost
-* **Ứng dụng chính (Next.js Dashboard)**: [http://localhost:3000](http://localhost:3000)
-* **Tài liệu API (FastAPI Swagger UI)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-* **Kafka UI (Giám sát luồng sự kiện)**: [http://localhost:8080](http://localhost:8080)
-* **Spark Web UI (Giám sát cụm Spark)**: [http://localhost:8081](http://localhost:8081)
-* **MinIO Console (Quản lý file ảnh & Parquet)**: [http://localhost:9001](http://localhost:9001) (`minioadmin` / `minioadmin`)
+### Chỉ mục chính tối ưu hóa hiệu năng (Indexing Strategy):
+* `idx_scans_created_at` (B-Tree): Tối ưu truy vấn Live Feed sắp xếp mới nhất.
+* `idx_scans_scores` (GIN): Inverted index chuyên biệt cho phép tìm kiếm nhanh dữ liệu xác suất y khoa lồng trong trường `scores` JSONB.
+* `idx_labeled_scans_added_to_training`: Index có điều kiện phục vụ gom nhanh các ca đã duyệt để huấn luyện mô hình.
 
 ---
 
-## 5. Chi Tiết Mô Hình AI & Công Cụ Định Vị Tổn Thương (Explainable AI - XAI)
+## 5. Danh Sách Địa Chỉ Truy Cập Cổng Mạng (Port Map)
 
-Để đảm bảo khả năng định vị chính xác vùng bệnh lý phục vụ chẩn đoán lâm sàng, hệ thống sử dụng một pipeline AI kết hợp giữa phân loại đa nhãn (Multi-label Classification) và thuật toán định vị không giám sát (Visual Explanation).
+Khi triển khai trên môi trường máy cục bộ (localhost), bạn có thể truy cập các cổng mạng dịch vụ sau:
 
-### 5.1. Mô Hình Phân Loại Đa Nhãn (DenseNet-121)
-* **Kiến Trúc Mô Hình**: Sử dụng mạng **DenseNet-121** từ thư viện **TorchXRayVision** (`densenet121-res224-all`), nổi tiếng trong y khoa nhờ cơ chế kết nối dày đặc (Dense Connectivity). Tất cả các lớp trước đó được nối trực tiếp làm đầu vào cho các lớp sau, giúp tối ưu hóa luồng thông tin và hạn chế tối đa hiện tượng tiêu biến gradient (vanishing gradient).
-* **Bộ Trọng Số (Weights)**: Được huấn luyện trên tập dữ liệu tổng hợp khổng lồ gồm hơn **800,000 ảnh X-quang ngực** từ các nguồn uy tín: NIH ChestX-ray8, CheXpert, Mimic-CXR, PadChest và PC.
-* **Danh Sách 18 Bệnh Lý Hỗ Trợ**:
-  `Atelectasis (Xẹp phổi)`, `Cardiomegaly (Bóng tim to)`, `Effusion (Tràn dịch)`, `Infiltration (Thâm nhiễm)`, `Mass (Khối u)`, `Nodule (Nốt mờ)`, `Pneumonia (Viêm phổi)`, `Pneumothorax (Tràn khí)`, `Consolidation (Đông đặc)`, `Edema (Phù phổi)`, `Emphysema (Khí phế thũng)`, `Fibrosis (Xơ phổi)`, `Pleural Thickening (Dày màng phổi)`, `Hernia (Thoát vị)`, `Infiltration`, `Lung Opacity`, `Support Devices (Thiết bị hỗ trợ)`.
-* **Độ Chính Xác Chẩn Đoán (AUC - Area Under ROC Curve)**:
-  Mô hình đạt hiệu năng chẩn đoán cạnh tranh với bác sĩ chuyên khoa trên các tập test lớn:
-  * Tràn dịch màng phổi (Effusion): **~0.87 AUC**
-  * Bóng tim to (Cardiomegaly): **~0.83 AUC**
-  * Tràn khí màng phổi (Pneumothorax): **~0.82 AUC**
-  * Xẹp phổi (Atelectasis): **~0.78 AUC**
-  * Trung bình tất cả bệnh lý: **~0.76 - 0.81 AUC**
-
-### 5.2. Công Nghệ Giải Thích & Định Vị Tổn Thương (Grad-CAM++)
-Để giải quyết bài toán "hộp đen" của Deep Learning và hỗ trợ bác sĩ khoanh vùng bệnh, hệ thống áp dụng kỹ thuật sinh bản đồ nhiệt tự động thông qua lớp BatchNorm cuối cùng `model.features.norm5` (lớp trích xuất đặc trưng không gian mạnh nhất trước khi đi qua Global Average Pooling).
-
-```
-                      [Ảnh Tiền Xử Lý: 224 x 224]
-                                  │
-                                  ▼
-                            [DenseNet-121]
-                                  │
-      ┌───────────────────────────┴───────────────────────────┐
-      ▼ (Feature Maps)                                        ▼ (Dự Đoán Lớp Bệnh)
-[features.norm5]                                      [Pathology Score > 0.75]
-      │                                                       │
-      └───────────────────────────┬───────────────────────────┘
-                                  ▼
-                        [Thuật Toán Grad-CAM++]
-                                  │
-                                  ▼
-                     [Gaussian Smoothing & Interpolate]
-                                  │
-                                  ▼
-                      [Thresholding (> 0.35)] ──> Ẩn nhiễu nền
-                                  │
-                                  ▼
-                   [Bbox Bounding Box (> 0.5)] ──> Khung đỏ `#FF3333`
-                                  │
-                                  ▼
-               [Hiển Thị Ảnh Slider So Sánh Trực Quan]
-```
-
-1. **Thuật Toán Grad-CAM++**: Sử dụng đạo hàm riêng bậc 2 và bậc 3 của điểm số dự đoán lớp bệnh mục tiêu đối với các feature maps của lớp `norm5`. Grad-CAM++ mang lại vùng kích hoạt mượt mà, gom cụm tốt và bám sát biên dạng của tổn thương hơn nhiều so với Grad-CAM cổ điển hay EigenCAM trên các cấu trúc mạng như ResNet.
-2. **Xử Lý Làm Mịn & Nội Suy**:
-   * Bản đồ nhiệt ban đầu ($7 \times 7$) được nội suy song tuần tuyến (bilinear interpolation) trực tiếp về kích thước ảnh gốc của bệnh nhân (bảo toàn tỷ lệ khung hình, tránh kéo giãn ảnh).
-   * Áp dụng bộ lọc **Gaussian Blur** với độ lệch chuẩn $\sigma = 2\%$ kích thước ảnh để hòa trộn màu mượt mà.
-3. **Lọc Nhiễu Nền Chặt Chẽ (Activation Threshold)**:
-   * Loại bỏ các vùng kích hoạt yếu bằng cách áp dụng ngưỡng (threshold) **0.35**. Bất kỳ pixel nào có mức độ chú ý dưới 35% sẽ được gán độ trong suốt (alpha = 0) để không làm che khuất các cấu trúc giải phẫu bình thường của phổi.
-4. **Tự Động Khoanh Vùng Bệnh (Auto Bounding Box)**:
-   * Hệ thống quét các vùng nóng có độ kích hoạt mạnh trên **50% (threshold > 0.5)**.
-   * Xác định tọa độ cực trị (x_min, y_min, x_max, y_max) và tự động vẽ khung chữ nhật màu đỏ bo góc (`FancyBboxPatch`, màu `#FF3333`, độ dày `2.5`, padding thêm `3%` rìa biên) để hỗ trợ thị giác cho người dùng đọc kết quả tức thì.
-
----
-
-## 6. Thiết Kế Cơ Sở Dữ Liệu (Database Schema Design)
-
-Hệ thống sử dụng **PostgreSđoQL 16** làm cơ sở dữ liệu quan hệ trung tâm, được thiết kế tối ưu cho cả tác vụ ghi log nhanh (OLTP) lẫn hỗ trợ phân tích dữ liệu (Analytics).
-
-### 6.1. Chi Tiết Các Bảng Dữ Liệu (Tables)
-
-#### 1. Bảng `scans` (Hồ Sơ Quét X-Quang)
-Đây là bảng cốt lỗi chứa thông tin chi tiết từng ca quét của bệnh nhân.
-* **`id`**: `UUID` (Khóa chính, tự động sinh)
-* **`created_at`**: `TIMESTAMPTZ` (Thời gian tạo)
-* **`image_key`**: `TEXT` (Khóa đường dẫn ảnh gốc lưu trên MinIO, ví dụ: `originals/uuid.jpg`)
-* **`heatmap_key`**: `TEXT` (Khóa đường dẫn ảnh bản đồ nhiệt lưu trên MinIO: `heatmaps/uuid.png`)
-* **`top_disease`**: `TEXT` (Bệnh lý nguy cơ cao nhất hoặc `NULL` nếu bình thường)
-* **`scores`**: `JSONB` (Xác suất của toàn bộ 18 bệnh lý dạng key-value, cho phép truy vấn động nhanh)
-* **`is_normal`**: `BOOLEAN` (Trạng thái phổi bình thường/bất thường)
-* **`explanation`**: `TEXT` (Báo cáo kết quả bằng tiếng Việt sinh từ LLM)
-* **`patient_id` / `notes`**: `TEXT` (Thông tin bổ sung bệnh nhân)
-* **`processing_time_ms`**: `INTEGER` (Thời gian backend xử lý tính bằng mili-giây)
-* **`source` / `ai_model_used`**: `TEXT` (Thiết bị gửi và mô hình AI được sử dụng)
-
-#### 2. Bảng `scan_events` (Nhật Ký Sự Kiện Kafka)
-Ghi nhận toàn bộ vết xử lý của luồng sự kiện bất đồng bộ nhằm giám sát hiệu năng hệ thống.
-* **`id`**: `BIGSERIAL` (Khóa chính tự tăng)
-* **`scan_id`**: `UUID` (Liên kết với bảng `scans`)
-* **`event_type`**: `TEXT` (Loại sự kiện: `scan.submitted`, `scan.processing`, `scan.completed`, `scan.failed`)
-* **`event_data`**: `JSONB` (Dữ liệu payload đi kèm)
-* **`kafka_offset` / `kafka_partition`**: `BIGINT` / `INTEGER` (Vị trí phân vùng lưu trữ sự kiện trong Kafka Broker)
-
-#### 3. Bảng `analytics_hourly` & `analytics_daily` (Bảng Tổng Hợp Thống Kê)
-Hai bảng phân tích được pre-aggregate sẵn theo giờ (`hour_bucket`) và ngày (`day_bucket`) phục vụ vẽ biểu đồ tức thì mà không cần quét lại bảng `scans` hàng triệu dòng.
-* **`total_scans`**: Tổng số ca quét.
-* **`normal_scans` / `abnormal_scans`**: Số ca phổi bình thường / bất thường.
-* **`avg_processing_ms`**: Thời gian xử lý trung bình.
-* **`disease_counts`**: `JSONB` (Cơ cấu số ca theo từng bệnh lý, ví dụ: `{"Pneumonia": 10, "Effusion": 3}`)
-* **`source_counts`**: `JSONB` (Phân phối số ca theo thiết bị gửi: `{"web": 8, "api": 5}`)
-
-#### 4. Bảng `spark_reports` (Kết Quả Báo Cáo Từ Spark)
-Lưu kết quả chạy phân tích batch định kỳ từ cụm Apache Spark.
-* **`report_type`**: Loại báo cáo (`daily_summary`, `weekly_trend`, v.v.)
-* **`report_data`**: `JSONB` (Chỉ số phân tích sâu được tổng hợp)
-* **`minio_path`**: Đường dẫn tới tệp định dạng Parquet tương ứng lưu trên MinIO S3.
-
----
-
-### 6.2. Chiến Lược Đánh Chỉ Mục (Indexing Strategy)
-Để tăng hiệu năng truy vấn lên tới hàng triệu dòng dữ liệu mẫu, hệ thống triển khai các chỉ mục chuyên biệt:
-* **Chỉ mục B-Tree chuẩn**:
-  * `idx_scans_created_at` (Sắp xếp thời gian giảm dần cho Live Feed).
-  * `idx_scans_top_disease` và `idx_scans_status` (Phục vụ lọc nhanh).
-* **Chỉ mục GIN (Generalized Inverted Index)**:
-  * `idx_scans_scores` sử dụng toán tử `USING GIN (scores)`. Giúp tìm kiếm cực nhanh các ca bệnh dựa trên điều kiện xác suất nằm sâu trong trường cấu trúc JSONB.
-
----
-
-### 6.3. Cơ Chế Tự Động Cập Nhật Thống Kê (Stored Procedures)
-Nhằm giảm tải tính toán cho Backend và đảm bảo tính nhất quán dữ liệu, hệ thống triển khai các trigger/hàm thủ tục lưu trữ bằng ngôn ngữ **PL/pgSQL**:
-* **`upsert_hourly_analytics(...)`** và **`upsert_daily_analytics(...)`**:
-  * Khi Kafka Consumer nhận sự kiện `scan.completed`, nó sẽ tự động gọi hai hàm này trong một giao dịch (transaction).
-  * Hàm thực hiện chèn dòng mới (nếu là giờ/ngày mới) hoặc tự động cập nhật cộng dồn số ca, cập nhật thời gian xử lý trung bình động và cập nhật tăng số đếm bệnh lý trong trường JSONB thông qua cơ chế `ON CONFLICT DO UPDATE`.
+* **Next.js Frontend (Ứng dụng chính)**: [http://localhost:3000](http://localhost:3000)
+* **FastAPI Backend Swagger (Tài liệu API)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+* **MLflow Tracking Server (Giám sát mô hình)**: [http://localhost:5001](http://localhost:5001)
+* **Kafka UI (Giám sát luồng sự kiện Kafka)**: [http://localhost:8088](http://localhost:8088)
+* **Apache Spark Web UI (Giám sát cụm Spark Master)**: [http://localhost:8081](http://localhost:8081)
+* **MinIO Console (S3 Object Storage Browser)**: [http://localhost:9001](http://localhost:9001) (tài khoản: `minioadmin` / `minioadmin`)
+* **Apache Airflow Webserver (Lịch trình tự động hóa)**: [http://localhost:8085](http://localhost:8085) (tài khoản: `admin` / `admin`)
+* **PostgreSQL Database**: Port `5432`
+* **Redis Cache**: Port `6379`
