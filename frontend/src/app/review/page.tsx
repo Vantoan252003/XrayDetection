@@ -33,6 +33,25 @@ export default function ReviewPage() {
     status: string; mode: string; progress: number; error_message: string | null; last_run_time: string | null;
   } | null>(null);
   const [trainStatusMsg, setTrainStatusMsg] = useState<string | null>(null);
+  const [modelVersions, setModelVersions] = useState<any[]>([]);
+  const [selectedBaseModel, setSelectedBaseModel] = useState<string>("default");
+
+  const fetchModelVersions = async () => {
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${baseUrl}/model-versions`);
+      if (res.ok) {
+        const data = await res.json();
+        setModelVersions(data.versions || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch model versions in review:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchModelVersions();
+  }, []);
 
   const fetchScans = async (tab: "pending" | "reviewed") => {
     setLoading(true);
@@ -197,7 +216,7 @@ export default function ReviewPage() {
     setError(null);
     try {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${baseUrl}/training/trigger`, { method: "POST" });
+      const res = await fetch(`${baseUrl}/training/trigger?base_model_version=${selectedBaseModel}`, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         setTrainStatusMsg(`🚀 Đã kích hoạt huấn luyện! ${data.ready_scans} ảnh sẵn sàng · Mode: ${data.mode || "local"}`);
@@ -269,14 +288,35 @@ export default function ReviewPage() {
             </div>
             {/* Train button when empty but in reviewed tab */}
             {activeTab === "reviewed" && (
-              <button
-                disabled={trainLoading}
-                onClick={handleTriggerTrain}
-                className="w-full mb-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center justify-center gap-1.5 font-bold text-xs transition-all disabled:opacity-50 shadow-sm"
-              >
-                {trainLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                Huấn luyện mô hình
-              </button>
+              <div className="mb-3 space-y-2">
+                {!trainLoading && (
+                  <div className="space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-100">
+                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide block text-left">
+                      Mô hình nền để Fine-tune:
+                    </label>
+                    <select
+                      value={selectedBaseModel}
+                      onChange={(e) => setSelectedBaseModel(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] text-slate-700 font-semibold focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="default">🖥️ DenseNet121 mặc định</option>
+                      {modelVersions.map((v) => (
+                        <option key={v.version} value={v.version}>
+                          📦 Phiên bản {v.version} ({v.stage === "Production" ? "Đang dùng" : v.stage === "Staging" ? "Chờ duyệt" : "Lưu trữ"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <button
+                  disabled={trainLoading}
+                  onClick={handleTriggerTrain}
+                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center justify-center gap-1.5 font-bold text-xs transition-all disabled:opacity-50 shadow-sm"
+                >
+                  {trainLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  Huấn luyện mô hình
+                </button>
+              </div>
             )}
             <p className="text-xs text-center py-8 italic text-slate-400">Danh sách trống.</p>
           </div>
@@ -336,6 +376,25 @@ export default function ReviewPage() {
             {/* Train Button in Reviewed tab */}
             {activeTab === "reviewed" && (
               <div className="mb-3 space-y-2">
+                {!trainLoading && (
+                  <div className="space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-100">
+                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide block">
+                      Mô hình nền để Fine-tune:
+                    </label>
+                    <select
+                      value={selectedBaseModel}
+                      onChange={(e) => setSelectedBaseModel(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] text-slate-700 font-semibold focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="default">🖥️ DenseNet121 mặc định</option>
+                      {modelVersions.map((v) => (
+                        <option key={v.version} value={v.version}>
+                          📦 Phiên bản {v.version} ({v.stage === "Production" ? "Đang dùng" : v.stage === "Staging" ? "Chờ duyệt" : "Lưu trữ"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <button
                   disabled={trainLoading}
                   onClick={handleTriggerTrain}

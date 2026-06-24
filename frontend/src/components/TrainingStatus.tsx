@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import { Play, Loader2, CheckCircle, AlertCircle, RefreshCw, Cpu, Cloud } from "lucide-react";
 
+type ModelVersion = {
+  version: string;
+  stage: string;
+  created_at: string;
+  metrics?: { avg_auc?: number; [key: string]: any };
+};
+
 type TrainStatusResponse = {
   status: string;
   mode: string;
@@ -13,10 +20,11 @@ type TrainStatusResponse = {
   message?: string;
 };
 
-export default function TrainingStatus() {
+export default function TrainingStatus({ versions = [] }: { versions?: ModelVersion[] }) {
   const [status, setStatus] = useState<TrainStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [triggerLoading, setTriggerLoading] = useState(false);
+  const [selectedBaseModel, setSelectedBaseModel] = useState<string>("default");
   const [msg, setMsg] = useState<string | null>(null);
 
   const fetchStatus = async () => {
@@ -49,7 +57,8 @@ export default function TrainingStatus() {
     setTriggerLoading(true);
     setMsg(null);
     try {
-      const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/training/trigger`;
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const url = `${baseUrl}/training/trigger?base_model_version=${selectedBaseModel}`;
       const res = await fetch(url, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
@@ -62,6 +71,15 @@ export default function TrainingStatus() {
       setMsg("Lỗi kết nối khi gửi yêu cầu.");
     } finally {
       setTriggerLoading(false);
+    }
+  };
+
+  const getStageLabel = (stage: string) => {
+    switch (stage.toLowerCase()) {
+      case "production": return "Đang dùng";
+      case "staging": return "Chờ duyệt";
+      case "archived": return "Đã lưu trữ";
+      default: return stage;
     }
   };
 
@@ -148,22 +166,43 @@ export default function TrainingStatus() {
           )}
 
           {!status.is_running && (
-            <div className="flex justify-between items-center pt-2">
-              <p className="text-[11px]" style={{ color: "var(--text-muted)", maxWidth: "70%" }}>
-                {status.mode === "local" 
-                  ? "Dữ liệu được huấn luyện an toàn, không rời khỏi hệ thống mạng nội bộ."
-                  : "Dữ liệu sẽ được đẩy lên Kaggle thông qua Dataset API bảo mật."
-                }
-              </p>
-              <button 
-                onClick={triggerTraining} 
-                disabled={triggerLoading} 
-                className="btn-primary flex items-center gap-1 text-xs" 
-                style={{ padding: "6px 12px" }}
-              >
-                {triggerLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                Trigger Train Job
-              </button>
+            <div className="space-y-3 pt-1">
+              {/* Dropdown for Base Model Selection */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
+                  Chọn mô hình nền (Base Model) để Fine-tune:
+                </label>
+                <select
+                  value={selectedBaseModel}
+                  onChange={(e) => setSelectedBaseModel(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-indigo-500 transition-colors"
+                >
+                  <option value="default">🖥️ Mô hình DenseNet121 pre-trained mặc định</option>
+                  {versions.map((v) => (
+                    <option key={v.version} value={v.version}>
+                      📦 Phiên bản {v.version} ({getStageLabel(v.stage)}) {v.metrics?.avg_auc ? `· AUC: ${(v.metrics.avg_auc * 100).toFixed(1)}%` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-between items-center pt-1.5">
+                <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)", maxWidth: "60%" }}>
+                  {status.mode === "local" 
+                    ? "Dữ liệu được huấn luyện an toàn, không rời khỏi hệ thống mạng nội bộ."
+                    : "Dữ liệu sẽ được đẩy lên Kaggle thông qua Dataset API bảo mật."
+                  }
+                </p>
+                <button 
+                  onClick={triggerTraining} 
+                  disabled={triggerLoading} 
+                  className="btn-primary flex items-center gap-1 text-xs" 
+                  style={{ padding: "7px 14px" }}
+                >
+                  {triggerLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  Trigger Train Job
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -107,31 +107,45 @@ async def prepare_training_data_local(temp_dir: str) -> tuple[str, str, int]:
                 
     return csv_path, images_dir, len(rows)
 
-def train_pytorch_model_sync(csv_path: str, images_dir: str, version_name: str) -> dict:
+def train_pytorch_model_sync(csv_path: str, images_dir: str, version_name: str, base_model_version: str = None) -> dict:
     """Hàm chạy huấn luyện đồng bộ (run trong ThreadPool)."""
     global training_status_state
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Local training started on device: {device}")
+    logger.info(f"Local training started on device: {device} | Base version selection: {base_model_version}")
     
     # 1. Đọc model DenseNet121 gốc hoặc load checkpoint trước đó
     model = xrv.models.DenseNet(weights="densenet121-res224-all")
-    model_local_path = os.path.join(tempfile.gettempdir(), "latest_model.pt")
+    model_local_path = os.path.join(tempfile.gettempdir(), f"train_base_{version_name}.pt")
     
     has_checkpoint = False
-    try:
-        s3.download_file(BUCKET_MODELS, "latest_model.pt", model_local_path)
-        has_checkpoint = True
-        logger.info("Latest checkpoint downloaded from MinIO.")
-    except Exception as e:
-        logger.info(f"No previous checkpoint found. Training from scratch. Details: {e}")
+    
+    if base_model_version == "default":
+        logger.info("Base model selection is 'default'. Training from base pre-trained model.")
+    elif base_model_version:
+        model_key = f"model_v{base_model_version}.pt"
+        logger.info(f"Attempting to download selected base model {model_key} from MinIO...")
+        try:
+            s3.download_file(BUCKET_MODELS, model_key, model_local_path)
+            has_checkpoint = True
+            logger.info(f"Base model {model_key} downloaded successfully.")
+        except Exception as e:
+            logger.error(f"Could not download selected base model {model_key}: {e}. Falling back to default weights.")
+    else:
+        # Fallback to latest_model.pt (default checkpoint behavior)
+        try:
+            s3.download_file(BUCKET_MODELS, "latest_model.pt", model_local_path)
+            has_checkpoint = True
+            logger.info("Latest checkpoint downloaded from MinIO.")
+        except Exception as e:
+            logger.info(f"No previous checkpoint found. Training from scratch. Details: {e}")
         
     if has_checkpoint:
         try:
             model.load_state_dict(torch.load(model_local_path, map_location=device))
-            logger.info("Model weights loaded from latest checkpoint.")
+            logger.info("Model weights loaded successfully.")
         except Exception as e:
-            logger.error(f"Failed to load checkpoint: {e}. Starting from base weights.")
+            logger.error(f"Failed to load weights: {e}. Starting from base weights.")
             
     model = model.to(device)
     pathologies = model.pathologies
@@ -228,7 +242,7 @@ def pd_read_csv_helper(filepath: str):
     import pandas as pd
     return pd.read_csv(filepath)
 
-async def run_local_training_pipeline(version_name: str):
+async def run_local_training_pipeline(version_name: str, base_model_version: str = None):
     """Tiến trình huấn luyện local toàn vẹn."""
     global training_status_state
     training_status_state["status"] = "running"
@@ -245,7 +259,7 @@ async def run_local_training_pipeline(version_name: str):
             return
             
         # 2. Huấn luyện trong thread khác để tránh blocking
-        res = await asyncio.to_thread(train_pytorch_model_sync, csv_path, images_dir, version_name)
+        res = await asyncio.to_thread(train_pytorch_model_sync, csv_path, images_dir, version_name, base_model_version)
         
         # 3. Upload model & metrics lên MinIO models bucket
         await asyncio.to_thread(upload_model, "latest_model.pt", res["model_path"])
@@ -440,7 +454,7 @@ async def check_kaggle_notebook_status(notebook_ref: str) -> str:
         logger.error(f"Error checking Kaggle notebook status: {e}")
         return "error"
 
-async def run_kaggle_training_pipeline(version_name: str):
+async def run_kaggle_training_pipeline(version_name: str, base_model_version: str = None):
     """Tiến trình huấn luyện Kaggle."""
     global training_status_state
     training_status_state["status"] = "running"
@@ -497,16 +511,16 @@ async def run_kaggle_training_pipeline(version_name: str):
 
 # ── Unified run method ──────────────────────────────────────────
 
-async def run_training_pipeline(version_name: str):
+async def run_training_pipeline(version_name: str, base_model_version: str = None):
     """Hàm chạy pipeline tích hợp dựa trên cấu hình môi trường."""
     global training_status_state
     mode = os.getenv("TRAINING_MODE", "local").lower()
     training_status_state["mode"] = mode
     
     if mode == "local":
-        await run_local_training_pipeline(version_name)
+        await run_local_training_pipeline(version_name, base_model_version)
     else:
-        await run_kaggle_training_pipeline(version_name)
+        await run_kaggle_training_pipeline(version_name, base_model_version)
 
 async def register_new_model(version_name: str) -> bool:
     """Đăng ký thủ công một model version từ MinIO vào MLflow."""

@@ -308,7 +308,7 @@ export default function ModelsPage() {
           </div>
 
           {/* Fine-tuning Status and trigger */}
-          <TrainingStatus />
+          <TrainingStatus versions={versions} />
         </div>
 
         {/* Right column: Current Active Production Model details */}
