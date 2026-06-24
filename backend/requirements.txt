@@ -21,3 +21,5 @@ redis
 websockets
 pyarrow
 pandas
+mlflow
+scikit-learn

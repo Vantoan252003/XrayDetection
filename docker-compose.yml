@@ -42,6 +42,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/00-init-dbs.sql:/docker-entrypoint-initdb.d/00-init-dbs.sql
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
@@ -117,7 +118,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     ports:
-      - "8080:8080"
+      - "8088:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: xray-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
@@ -146,13 +147,91 @@ services:
     build: ./spark
     command: bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /opt/spark/logs/*"
     environment:
-      SPARK_WORKER_CORES: 2
-      SPARK_WORKER_MEMORY: 2g
-      SPARK_NO_DAEMONIZE: 1
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_NO_DAEMONIZE=1
     depends_on:
       - spark-master
     volumes:
       - ./spark:/opt/spark-apps
+    restart: unless-stopped
+
+  # ── MLflow Tracking Server ──────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5001:5000"
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - MLFLOW_S3_IGNORE_TLS=true
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://xray:secret@postgres:5432/mlflow
+      --default-artifact-root s3://mlflow-artifacts/
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Apache Airflow ──────────────────────────────────────────
+  airflow-init:
+    build: ./airflow
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://xray:secret@postgres:5432/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW_ADMIN_USER=${AIRFLOW_ADMIN_USER:-admin}
+      - AIRFLOW_ADMIN_PASSWORD=${AIRFLOW_ADMIN_PASSWORD:-admin}
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create --username \"$$AIRFLOW_ADMIN_USER\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname Admin --lastname Admin --role Admin --email admin@example.com || true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-webserver:
+    build: ./airflow
+    ports:
+      - "8085:8080"
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://xray:secret@postgres:5432/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+    command: webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    build: ./airflow
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://xray:secret@postgres:5432/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - .env:/opt/airflow/.env
+    command: scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

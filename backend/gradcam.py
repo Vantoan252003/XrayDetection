@@ -6,12 +6,10 @@ import matplotlib.patches as patches
 import io
 import torch
 import torchxrayvision as xrv
-from xray_model import model
-
 THRESHOLD = 0.6  # chỉ report bệnh có confidence > 75%
 
 
-def predict(img_tensor: torch.Tensor) -> dict:
+def predict(img_tensor: torch.Tensor, model) -> dict:
     with torch.no_grad():
         preds = model(img_tensor)[0]
     scores = dict(zip(model.pathologies, preds.numpy().tolist()))
@@ -34,7 +32,7 @@ class XRVModelWrapper(torch.nn.Module):
         return self.xrv_model(x)
 
 
-def generate_heatmap(img_tensor: torch.Tensor, disease: str, original_image_bytes: bytes) -> bytes:
+def generate_heatmap(img_tensor: torch.Tensor, disease: str, original_image_bytes: bytes, model) -> bytes:
     try:
         disease_idx = model.pathologies.index(disease)
     except ValueError:

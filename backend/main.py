@@ -8,16 +8,16 @@ from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocket
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from utils import preprocess_xray
-from gradcam import predict, generate_heatmap
-from xray_model import model
-from llm import explain_results
-from storage import ensure_bucket, upload_image, s3, BUCKET
+from storage import ensure_bucket, s3, BUCKET
 from database import save_scan, get_scan, list_scans, get_pool
 from kafka_producer import publish_scan_event, stop_producer
 from kafka_consumer import start_consumer, stop_consumer
 from websocket_manager import ws_manager
 import analytics
+
+from services.inference_service import analyze_single_xray
+from services import model_registry
+from routers import batch, review, training
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,6 +69,28 @@ app.add_middleware(
 )
 
 
+# ── Register New Routers ────────────────────────────────────────
+app.include_router(batch.router)
+app.include_router(review.router)
+app.include_router(training.router)
+
+
+# ── Model Versions Management Endpoints ────────────────────────
+@app.get("/model-versions")
+async def list_versions():
+    """Lấy danh sách các model versions từ MLflow."""
+    versions = model_registry.list_model_versions()
+    return JSONResponse({"versions": versions})
+
+@app.post("/model-versions/{version}/promote")
+async def promote_version(version: str):
+    """Promote một version model lên Production."""
+    success = model_registry.promote_to_production(version)
+    if not success:
+        return JSONResponse(status_code=500, content={"error": "Failed to promote model version"})
+    return JSONResponse({"status": "success", "message": f"Version {version} promoted to Production"})
+
+
 # ── Core: X-Ray Analysis ────────────────────────────────────────
 
 @app.post("/analyze")
@@ -77,90 +99,27 @@ async def analyze_xray(
     patient_id: str | None = Form(None),
     ai_model: str = Form("gemini"),
     source: str = Form("web"),
+    model_version: str | None = Form(None),
+    skip_llm: bool = Form(False),
 ):
-    scan_id = str(uuid.uuid4())
-    start_time = time.time()
+    """Endpoint xử lý phân tích đơn lẻ ảnh X-quang."""
     file_bytes = await file.read()
+    try:
+        result = await analyze_single_xray(
+            file_bytes=file_bytes,
+            filename=file.filename,
+            content_type=file.content_type or "image/jpeg",
+            patient_id=patient_id,
+            ai_model=ai_model,
+            source=source,
+            model_version=model_version,
+            skip_llm=skip_llm,
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Error analyzing single X-Ray scan: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Analysis failed: {str(e)}"})
 
-    # Publish scan.submitted event
-    await publish_scan_event("scan.submitted", scan_id, {
-        "patient_id": patient_id,
-        "source": source,
-        "ai_model": ai_model,
-        "file_size": len(file_bytes),
-    })
-
-    # Publish scan.processing event
-    await publish_scan_event("scan.processing", scan_id, {})
-
-    # Bước 1: Preprocess
-    img_tensor = preprocess_xray(file_bytes, target_resolution=getattr(model, "input_resolution", 224))
-
-    # Bước 2: Predict bệnh
-    scores = predict(img_tensor)
-    is_normal = len(scores) == 0
-    top_disease = max(scores, key=scores.get) if scores else None
-    top_score = scores.get(top_disease, 0) if top_disease else 0
-    
-    if top_score <= 0.6:
-        top_disease = None
-        is_normal = True
-
-    # Bước 3: Grad-CAM
-    heatmap_bytes = generate_heatmap(img_tensor, top_disease, file_bytes) if top_disease else b""
-
-    # Bước 4: Upload ảnh gốc + heatmap lên MinIO
-    image_key = f"originals/{scan_id}.jpg"
-    heatmap_key = f"heatmaps/{scan_id}.png"
-    upload_image(image_key, file_bytes, content_type=file.content_type or "image/jpeg")
-    if heatmap_bytes:
-        upload_image(heatmap_key, heatmap_bytes, content_type="image/png")
-
-    # Bước 5: AI giải thích
-    explanation = (
-        explain_results(scores, heatmap_bytes, top_disease, ai_model)
-        if top_disease else "Không phát hiện dấu hiệu bất thường rõ ràng nào trên ảnh X-quang này."
-    )
-
-    # Calculate processing time
-    processing_time_ms = int((time.time() - start_time) * 1000)
-
-    # Bước 6: Lưu vào PostgreSQL
-    await save_scan(
-        scan_id=scan_id,
-        image_key=image_key,
-        heatmap_key=heatmap_key,
-        scores=scores,
-        top_disease=top_disease,
-        is_normal=is_normal,
-        explanation=explanation,
-        patient_id=patient_id,
-        processing_time_ms=processing_time_ms,
-        source=source,
-        ai_model_used=ai_model,
-    )
-
-    # Bước 7: Publish scan.completed event to Kafka
-    await publish_scan_event("scan.completed", scan_id, {
-        "top_disease": top_disease,
-        "is_normal": is_normal,
-        "processing_time_ms": processing_time_ms,
-        "scores": scores,
-        "source": source,
-        "patient_id": patient_id,
-    })
-
-    # Bước 8: Trả về
-    return JSONResponse({
-        "scan_id": scan_id,
-        "scores": scores,
-        "top_disease": top_disease,
-        "is_normal": is_normal,
-        "image_url": f"http://localhost:8000/images/{image_key}",
-        "heatmap_url": f"http://localhost:8000/images/{heatmap_key}" if heatmap_bytes else None,
-        "explanation": explanation,
-        "processing_time_ms": processing_time_ms,
-    })
 
 
 # ── Image Proxy ─────────────────────────────────────────────────

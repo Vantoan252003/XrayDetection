@@ -2,6 +2,8 @@
 
 import { translateDisease } from "@/utils/disease";
 import ImageSlider from "@/components/ImageSlider";
+import ModelSelector from "@/components/ModelSelector";
+import DiseaseCheckbox from "@/components/DiseaseCheckbox";
 import { useState, useRef, useEffect } from "react";
 import {
   UploadCloud, Loader2, AlertCircle,
@@ -33,6 +35,14 @@ export default function XRayUploader() {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aiModel, setAiModel] = useState<string>("gemini");
+  const [modelVersion, setModelVersion] = useState<string>("");
+  const [skipLlm, setSkipLlm] = useState(false);
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
+  const [editingLabels, setEditingLabels] = useState(false);
+  const [verifiedLabels, setVerifiedLabels] = useState<Record<string, boolean>>({});
+  const [savingReview, setSavingReview] = useState(false);
+  const [reviewSaved, setReviewSaved] = useState(false);
+
   const [models, setModels] = useState<AIModel[]>([
     { id: "gemini", name: "Gemini 2.5 Flash", type: "cloud", description: "Google Cloud (Khuyến nghị)" },
     { id: "llava", name: "LLaVA (Local)", type: "local", description: "Ollama Local (Offline)" },
@@ -76,16 +86,57 @@ export default function XRayUploader() {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("ai_model", aiModel);
+    fd.append("skip_llm", String(skipLlm));
+    if (modelVersion) {
+      fd.append("model_version", modelVersion);
+    }
     try {
       const r = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/analyze`, { method: "POST", body: fd });
       if (!r.ok) throw new Error("Lỗi khi phân tích ảnh. Vui lòng thử lại.");
-      setResult(await r.json());
+      const data = await r.json();
+      setResult(data);
+      
+      const initialLabels: Record<string, boolean> = {};
+      if (data.scores) {
+        Object.entries(data.scores).forEach(([d, s]) => {
+          if ((s as number) > 0.6) initialLabels[d] = true;
+        });
+      }
+      setVerifiedLabels(initialLabels);
+      setShowReviewPrompt(true);
+      setReviewSaved(false);
+      setEditingLabels(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Đã xảy ra lỗi không xác định.");
     } finally { setLoading(false); }
   };
 
-  const reset = () => { setFile(null); setPreview(null); setResult(null); setError(null); };
+  const submitImmediateReview = async () => {
+    if (!result) return;
+    setSavingReview(true);
+    try {
+      const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/review/${result.scan_id}/approve`;
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verified_labels: verifiedLabels }),
+      });
+      if (r.ok) {
+        setReviewSaved(true);
+        setShowReviewPrompt(false);
+        setEditingLabels(false);
+      } else {
+        const err = await r.json();
+        setError(err.detail || "Không thể lưu xác nhận của bác sĩ.");
+      }
+    } catch (e) {
+      setError("Lỗi kết nối khi lưu xác nhận.");
+    } finally {
+      setSavingReview(false);
+    }
+  };
+
+  const reset = () => { setFile(null); setPreview(null); setResult(null); setError(null); setShowReviewPrompt(false); setEditingLabels(false); };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -137,46 +188,63 @@ export default function XRayUploader() {
 
           {/* Model selector */}
           {file && (
-            <div className="chart-card">
-              <p className="text-sm font-bold mb-3" style={{ color: "var(--text-primary)" }}>Chọn mô hình AI</p>
-              <div className="grid grid-cols-2 gap-3">
-                {models.map(m => {
-                  const IconComponent = m.type === "cloud" ? Cloud : Cpu;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => setAiModel(m.id)}
-                      className="flex items-center gap-3 p-4 rounded-xl text-left transition-all"
-                      style={{
-                        border: `2px solid ${aiModel === m.id ? "var(--indigo-400)" : "var(--border-light)"}`,
-                        background: aiModel === m.id ? "var(--indigo-50)" : "var(--bg-card)",
-                      }}
-                    >
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ background: aiModel === m.id ? "var(--indigo-100)" : "var(--bg-subtle)" }}>
-                        <IconComponent className="w-5 h-5" style={{ color: aiModel === m.id ? "var(--indigo-500)" : "var(--text-muted)" }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>{m.name}</p>
-                          {m.type === "cloud" && <span className="badge badge-indigo text-[10px]">Khuyến nghị</span>}
+            <div className="chart-card space-y-4">
+              <div>
+                <p className="text-sm font-bold mb-3" style={{ color: "var(--text-primary)" }}>Chọn mô hình LLM giải thích báo cáo</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {models.map(m => {
+                    const IconComponent = m.type === "cloud" ? Cloud : Cpu;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => setAiModel(m.id)}
+                        className="flex items-center gap-3 p-4 rounded-xl text-left transition-all"
+                        style={{
+                          border: `2px solid ${aiModel === m.id ? "var(--indigo-400)" : "var(--border-light)"}`,
+                          background: aiModel === m.id ? "var(--indigo-50)" : "var(--bg-card)",
+                        }}
+                      >
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: aiModel === m.id ? "var(--indigo-100)" : "var(--bg-subtle)" }}>
+                          <IconComponent className="w-5 h-5" style={{ color: aiModel === m.id ? "var(--indigo-500)" : "var(--text-muted)" }} />
                         </div>
-                        <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{m.description}</p>
-                      </div>
-                    </button>
-                  );
-                })}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>{m.name}</p>
+                            {m.type === "cloud" && <span className="badge badge-indigo text-[10px]">Khuyến nghị</span>}
+                          </div>
+                          <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{m.description}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              <div style={{ borderTop: "1px solid var(--border-light)", paddingTop: "16px" }}>
+                <ModelSelector selectedVersion={modelVersion} onChange={setModelVersion} />
               </div>
             </div>
           )}
 
           {/* Actions */}
           {file && (
-            <div className="flex justify-center gap-3">
-              <button onClick={reset} className="btn-secondary">Hủy bỏ</button>
-              <button onClick={analyze} disabled={loading} className="btn-primary" style={{ opacity: loading ? 0.7 : 1 }}>
-                {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Đang xử lý...</> : "🔬 Phân tích ngay"}
-              </button>
+            <div className="flex flex-col items-center gap-4 mt-2">
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" style={{ color: "var(--text-secondary)" }}>
+                <input 
+                  type="checkbox" 
+                  checked={skipLlm} 
+                  onChange={e => setSkipLlm(e.target.checked)} 
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" 
+                />
+                Chỉ phân tích ảnh, bỏ qua AI giải thích (Nhanh hơn)
+              </label>
+              <div className="flex justify-center gap-3">
+                <button onClick={reset} className="btn-secondary">Hủy bỏ</button>
+                <button onClick={analyze} disabled={loading} className="btn-primary" style={{ opacity: loading ? 0.7 : 1 }}>
+                  {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Đang xử lý...</> : "🔬 Phân tích ngay"}
+                </button>
+              </div>
             </div>
           )}
         </>
@@ -194,7 +262,7 @@ export default function XRayUploader() {
       {/* Result */}
       {result && (
         <div className="animate-fade-in-up space-y-5">
-          <div className="flex items-center justify-between pb-4" style={{ borderBottom: "1px solid var(--border-light)" }}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 gap-4" style={{ borderBottom: "1px solid var(--border-light)" }}>
             <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
               <CheckCircle2 className="w-5 h-5" style={{ color: "var(--emerald-500)" }} />
               Kết quả phân tích
@@ -202,10 +270,60 @@ export default function XRayUploader() {
                 <span className="badge badge-info text-xs">{(result.processing_time_ms / 1000).toFixed(1)}s</span>
               )}
             </h2>
-            <button onClick={reset} className="btn-secondary" style={{ padding: "7px 14px" }}>
+            <button onClick={reset} className="btn-secondary text-sm" style={{ padding: "7px 14px", alignSelf: "flex-start" }}>
               ← Phân tích ảnh mới
             </button>
           </div>
+
+          {/* Immediate Review Prompt */}
+          {showReviewPrompt && !reviewSaved && (
+            <div className="p-4 rounded-xl border-2" style={{ background: "var(--indigo-50)", borderColor: "var(--indigo-200)" }}>
+              <h3 className="text-sm font-bold text-indigo-800 mb-3">Phán đoán của AI đã chính xác chưa thưa bác sĩ?</h3>
+              
+              {!editingLabels ? (
+                <div className="flex gap-3">
+                  <button 
+                    onClick={submitImmediateReview} 
+                    disabled={savingReview}
+                    className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50"
+                  >
+                    {savingReview ? "Đang lưu..." : "Đúng, lưu kết quả này"}
+                  </button>
+                  <button 
+                    onClick={() => setEditingLabels(true)}
+                    className="flex-1 py-2 bg-white hover:bg-slate-50 text-indigo-600 border border-indigo-200 rounded-lg text-sm font-bold transition-all"
+                  >
+                    Chưa đúng, tôi muốn tự chọn bệnh
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <DiseaseCheckbox 
+                    scores={result.scores} 
+                    verifiedLabels={verifiedLabels} 
+                    onChange={(d, checked) => setVerifiedLabels(prev => ({ ...prev, [d]: checked }))} 
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setEditingLabels(false)} className="btn-secondary text-xs px-3 py-1.5">Hủy</button>
+                    <button 
+                      onClick={submitImmediateReview}
+                      disabled={savingReview}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50"
+                    >
+                      {savingReview ? "Đang lưu..." : "Xác nhận & Lưu vào hệ thống"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {reviewSaved && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-bold">
+              <CheckCircle2 className="w-5 h-5" />
+              Đã xác nhận và lưu nhãn thành công. Kết quả này đã được đánh dấu an toàn để huấn luyện AI sau này.
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Image */}

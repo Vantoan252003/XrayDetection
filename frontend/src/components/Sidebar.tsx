@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Upload,
+  Files,
+  CheckSquare,
+  Cpu,
   BarChart3,
   FileText,
   Activity,
@@ -14,6 +17,9 @@ import {
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/upload",    label: "Upload X-Ray",    icon: Upload },
+  { href: "/batch",     label: "Upload Hàng Loạt", icon: Files },
+  { href: "/review",    label: "Bác Sĩ Review",   icon: CheckSquare },
+  { href: "/models",    label: "Quản Lý Models",  icon: Cpu },
   { href: "/analytics", label: "Phân tích",      icon: BarChart3 },
   { href: "/reports",   label: "Spark Reports",  icon: FileText },
 ];
