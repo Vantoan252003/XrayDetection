@@ -1,6 +1,9 @@
 import os
 import requests
 import base64
+import logging
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -54,8 +57,8 @@ def _explain_with_ollama(prompt: str, model_name: str, heatmap_bytes: bytes) -> 
 
 
 def _explain_with_gemini(prompt: str, heatmap_bytes: bytes) -> str:
-    """Gọi Gemini qua REST API của Google (thử 2.5 Flash trước, fallback sang 1.5 Flash)."""
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    """Gọi Gemini qua REST API của Google."""
+    models_to_try = ["gemini-2.5-flash", "gemini-3.1-flash-lite"]
     last_err = None
 
     for model in models_to_try:
