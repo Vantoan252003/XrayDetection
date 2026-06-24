@@ -38,7 +38,7 @@ Luồng xử lý từ lúc người dùng tải lên một ảnh X-quang đến 
                                                  ▼
 [Dashboard Next.js] ◄── WebSocket ◄── Kafka Consumer ◄── Apache Kafka (Broker)
                                                              │
-                                                             ▼
+                                   me                           ▼
                                                     Apache Spark (Streaming)
                                                              │
                                                              ▼
@@ -135,3 +135,124 @@ docker compose exec spark-master /opt/spark/bin/spark-submit \
 * **Kafka UI (Giám sát luồng sự kiện)**: [http://localhost:8080](http://localhost:8080)
 * **Spark Web UI (Giám sát cụm Spark)**: [http://localhost:8081](http://localhost:8081)
 * **MinIO Console (Quản lý file ảnh & Parquet)**: [http://localhost:9001](http://localhost:9001) (`minioadmin` / `minioadmin`)
+
+---
+
+## 5. Chi Tiết Mô Hình AI & Công Cụ Định Vị Tổn Thương (Explainable AI - XAI)
+
+Để đảm bảo khả năng định vị chính xác vùng bệnh lý phục vụ chẩn đoán lâm sàng, hệ thống sử dụng một pipeline AI kết hợp giữa phân loại đa nhãn (Multi-label Classification) và thuật toán định vị không giám sát (Visual Explanation).
+
+### 5.1. Mô Hình Phân Loại Đa Nhãn (DenseNet-121)
+* **Kiến Trúc Mô Hình**: Sử dụng mạng **DenseNet-121** từ thư viện **TorchXRayVision** (`densenet121-res224-all`), nổi tiếng trong y khoa nhờ cơ chế kết nối dày đặc (Dense Connectivity). Tất cả các lớp trước đó được nối trực tiếp làm đầu vào cho các lớp sau, giúp tối ưu hóa luồng thông tin và hạn chế tối đa hiện tượng tiêu biến gradient (vanishing gradient).
+* **Bộ Trọng Số (Weights)**: Được huấn luyện trên tập dữ liệu tổng hợp khổng lồ gồm hơn **800,000 ảnh X-quang ngực** từ các nguồn uy tín: NIH ChestX-ray8, CheXpert, Mimic-CXR, PadChest và PC.
+* **Danh Sách 18 Bệnh Lý Hỗ Trợ**:
+  `Atelectasis (Xẹp phổi)`, `Cardiomegaly (Bóng tim to)`, `Effusion (Tràn dịch)`, `Infiltration (Thâm nhiễm)`, `Mass (Khối u)`, `Nodule (Nốt mờ)`, `Pneumonia (Viêm phổi)`, `Pneumothorax (Tràn khí)`, `Consolidation (Đông đặc)`, `Edema (Phù phổi)`, `Emphysema (Khí phế thũng)`, `Fibrosis (Xơ phổi)`, `Pleural Thickening (Dày màng phổi)`, `Hernia (Thoát vị)`, `Infiltration`, `Lung Opacity`, `Support Devices (Thiết bị hỗ trợ)`.
+* **Độ Chính Xác Chẩn Đoán (AUC - Area Under ROC Curve)**:
+  Mô hình đạt hiệu năng chẩn đoán cạnh tranh với bác sĩ chuyên khoa trên các tập test lớn:
+  * Tràn dịch màng phổi (Effusion): **~0.87 AUC**
+  * Bóng tim to (Cardiomegaly): **~0.83 AUC**
+  * Tràn khí màng phổi (Pneumothorax): **~0.82 AUC**
+  * Xẹp phổi (Atelectasis): **~0.78 AUC**
+  * Trung bình tất cả bệnh lý: **~0.76 - 0.81 AUC**
+
+### 5.2. Công Nghệ Giải Thích & Định Vị Tổn Thương (Grad-CAM++)
+Để giải quyết bài toán "hộp đen" của Deep Learning và hỗ trợ bác sĩ khoanh vùng bệnh, hệ thống áp dụng kỹ thuật sinh bản đồ nhiệt tự động thông qua lớp BatchNorm cuối cùng `model.features.norm5` (lớp trích xuất đặc trưng không gian mạnh nhất trước khi đi qua Global Average Pooling).
+
+```
+                      [Ảnh Tiền Xử Lý: 224 x 224]
+                                  │
+                                  ▼
+                            [DenseNet-121]
+                                  │
+      ┌───────────────────────────┴───────────────────────────┐
+      ▼ (Feature Maps)                                        ▼ (Dự Đoán Lớp Bệnh)
+[features.norm5]                                      [Pathology Score > 0.75]
+      │                                                       │
+      └───────────────────────────┬───────────────────────────┘
+                                  ▼
+                        [Thuật Toán Grad-CAM++]
+                                  │
+                                  ▼
+                     [Gaussian Smoothing & Interpolate]
+                                  │
+                                  ▼
+                      [Thresholding (> 0.35)] ──> Ẩn nhiễu nền
+                                  │
+                                  ▼
+                   [Bbox Bounding Box (> 0.5)] ──> Khung đỏ `#FF3333`
+                                  │
+                                  ▼
+               [Hiển Thị Ảnh Slider So Sánh Trực Quan]
+```
+
+1. **Thuật Toán Grad-CAM++**: Sử dụng đạo hàm riêng bậc 2 và bậc 3 của điểm số dự đoán lớp bệnh mục tiêu đối với các feature maps của lớp `norm5`. Grad-CAM++ mang lại vùng kích hoạt mượt mà, gom cụm tốt và bám sát biên dạng của tổn thương hơn nhiều so với Grad-CAM cổ điển hay EigenCAM trên các cấu trúc mạng như ResNet.
+2. **Xử Lý Làm Mịn & Nội Suy**:
+   * Bản đồ nhiệt ban đầu ($7 \times 7$) được nội suy song tuần tuyến (bilinear interpolation) trực tiếp về kích thước ảnh gốc của bệnh nhân (bảo toàn tỷ lệ khung hình, tránh kéo giãn ảnh).
+   * Áp dụng bộ lọc **Gaussian Blur** với độ lệch chuẩn $\sigma = 2\%$ kích thước ảnh để hòa trộn màu mượt mà.
+3. **Lọc Nhiễu Nền Chặt Chẽ (Activation Threshold)**:
+   * Loại bỏ các vùng kích hoạt yếu bằng cách áp dụng ngưỡng (threshold) **0.35**. Bất kỳ pixel nào có mức độ chú ý dưới 35% sẽ được gán độ trong suốt (alpha = 0) để không làm che khuất các cấu trúc giải phẫu bình thường của phổi.
+4. **Tự Động Khoanh Vùng Bệnh (Auto Bounding Box)**:
+   * Hệ thống quét các vùng nóng có độ kích hoạt mạnh trên **50% (threshold > 0.5)**.
+   * Xác định tọa độ cực trị (x_min, y_min, x_max, y_max) và tự động vẽ khung chữ nhật màu đỏ bo góc (`FancyBboxPatch`, màu `#FF3333`, độ dày `2.5`, padding thêm `3%` rìa biên) để hỗ trợ thị giác cho người dùng đọc kết quả tức thì.
+
+---
+
+## 6. Thiết Kế Cơ Sở Dữ Liệu (Database Schema Design)
+
+Hệ thống sử dụng **PostgreSđoQL 16** làm cơ sở dữ liệu quan hệ trung tâm, được thiết kế tối ưu cho cả tác vụ ghi log nhanh (OLTP) lẫn hỗ trợ phân tích dữ liệu (Analytics).
+
+### 6.1. Chi Tiết Các Bảng Dữ Liệu (Tables)
+
+#### 1. Bảng `scans` (Hồ Sơ Quét X-Quang)
+Đây là bảng cốt lỗi chứa thông tin chi tiết từng ca quét của bệnh nhân.
+* **`id`**: `UUID` (Khóa chính, tự động sinh)
+* **`created_at`**: `TIMESTAMPTZ` (Thời gian tạo)
+* **`image_key`**: `TEXT` (Khóa đường dẫn ảnh gốc lưu trên MinIO, ví dụ: `originals/uuid.jpg`)
+* **`heatmap_key`**: `TEXT` (Khóa đường dẫn ảnh bản đồ nhiệt lưu trên MinIO: `heatmaps/uuid.png`)
+* **`top_disease`**: `TEXT` (Bệnh lý nguy cơ cao nhất hoặc `NULL` nếu bình thường)
+* **`scores`**: `JSONB` (Xác suất của toàn bộ 18 bệnh lý dạng key-value, cho phép truy vấn động nhanh)
+* **`is_normal`**: `BOOLEAN` (Trạng thái phổi bình thường/bất thường)
+* **`explanation`**: `TEXT` (Báo cáo kết quả bằng tiếng Việt sinh từ LLM)
+* **`patient_id` / `notes`**: `TEXT` (Thông tin bổ sung bệnh nhân)
+* **`processing_time_ms`**: `INTEGER` (Thời gian backend xử lý tính bằng mili-giây)
+* **`source` / `ai_model_used`**: `TEXT` (Thiết bị gửi và mô hình AI được sử dụng)
+
+#### 2. Bảng `scan_events` (Nhật Ký Sự Kiện Kafka)
+Ghi nhận toàn bộ vết xử lý của luồng sự kiện bất đồng bộ nhằm giám sát hiệu năng hệ thống.
+* **`id`**: `BIGSERIAL` (Khóa chính tự tăng)
+* **`scan_id`**: `UUID` (Liên kết với bảng `scans`)
+* **`event_type`**: `TEXT` (Loại sự kiện: `scan.submitted`, `scan.processing`, `scan.completed`, `scan.failed`)
+* **`event_data`**: `JSONB` (Dữ liệu payload đi kèm)
+* **`kafka_offset` / `kafka_partition`**: `BIGINT` / `INTEGER` (Vị trí phân vùng lưu trữ sự kiện trong Kafka Broker)
+
+#### 3. Bảng `analytics_hourly` & `analytics_daily` (Bảng Tổng Hợp Thống Kê)
+Hai bảng phân tích được pre-aggregate sẵn theo giờ (`hour_bucket`) và ngày (`day_bucket`) phục vụ vẽ biểu đồ tức thì mà không cần quét lại bảng `scans` hàng triệu dòng.
+* **`total_scans`**: Tổng số ca quét.
+* **`normal_scans` / `abnormal_scans`**: Số ca phổi bình thường / bất thường.
+* **`avg_processing_ms`**: Thời gian xử lý trung bình.
+* **`disease_counts`**: `JSONB` (Cơ cấu số ca theo từng bệnh lý, ví dụ: `{"Pneumonia": 10, "Effusion": 3}`)
+* **`source_counts`**: `JSONB` (Phân phối số ca theo thiết bị gửi: `{"web": 8, "api": 5}`)
+
+#### 4. Bảng `spark_reports` (Kết Quả Báo Cáo Từ Spark)
+Lưu kết quả chạy phân tích batch định kỳ từ cụm Apache Spark.
+* **`report_type`**: Loại báo cáo (`daily_summary`, `weekly_trend`, v.v.)
+* **`report_data`**: `JSONB` (Chỉ số phân tích sâu được tổng hợp)
+* **`minio_path`**: Đường dẫn tới tệp định dạng Parquet tương ứng lưu trên MinIO S3.
+
+---
+
+### 6.2. Chiến Lược Đánh Chỉ Mục (Indexing Strategy)
+Để tăng hiệu năng truy vấn lên tới hàng triệu dòng dữ liệu mẫu, hệ thống triển khai các chỉ mục chuyên biệt:
+* **Chỉ mục B-Tree chuẩn**:
+  * `idx_scans_created_at` (Sắp xếp thời gian giảm dần cho Live Feed).
+  * `idx_scans_top_disease` và `idx_scans_status` (Phục vụ lọc nhanh).
+* **Chỉ mục GIN (Generalized Inverted Index)**:
+  * `idx_scans_scores` sử dụng toán tử `USING GIN (scores)`. Giúp tìm kiếm cực nhanh các ca bệnh dựa trên điều kiện xác suất nằm sâu trong trường cấu trúc JSONB.
+
+---
+
+### 6.3. Cơ Chế Tự Động Cập Nhật Thống Kê (Stored Procedures)
+Nhằm giảm tải tính toán cho Backend và đảm bảo tính nhất quán dữ liệu, hệ thống triển khai các trigger/hàm thủ tục lưu trữ bằng ngôn ngữ **PL/pgSQL**:
+* **`upsert_hourly_analytics(...)`** và **`upsert_daily_analytics(...)`**:
+  * Khi Kafka Consumer nhận sự kiện `scan.completed`, nó sẽ tự động gọi hai hàm này trong một giao dịch (transaction).
+  * Hàm thực hiện chèn dòng mới (nếu là giờ/ngày mới) hoặc tự động cập nhật cộng dồn số ca, cập nhật thời gian xử lý trung bình động và cập nhật tăng số đếm bệnh lý trong trường JSONB thông qua cơ chế `ON CONFLICT DO UPDATE`.

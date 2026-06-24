@@ -2,6 +2,7 @@ import uuid
 import time
 import asyncio
 import logging
+import requests
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -9,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from utils import preprocess_xray
 from gradcam import predict, generate_heatmap
+from xray_model import model
 from llm import explain_results
 from storage import ensure_bucket, upload_image, s3, BUCKET
 from database import save_scan, get_scan, list_scans, get_pool
@@ -92,7 +94,7 @@ async def analyze_xray(
     await publish_scan_event("scan.processing", scan_id, {})
 
     # Bước 1: Preprocess
-    img_tensor = preprocess_xray(file_bytes)
+    img_tensor = preprocess_xray(file_bytes, target_resolution=getattr(model, "input_resolution", 224))
 
     # Bước 2: Predict bệnh
     scores = predict(img_tensor)
@@ -100,7 +102,7 @@ async def analyze_xray(
     top_disease = max(scores, key=scores.get) if scores else None
     top_score = scores.get(top_disease, 0) if top_disease else 0
     
-    if top_score <= 0.75:
+    if top_score <= 0.6:
         top_disease = None
         is_normal = True
 
@@ -286,6 +288,35 @@ async def analytics_spark_reports(
     pool = await get_pool()
     reports = await analytics.get_spark_reports(pool, report_type, limit)
     return JSONResponse({"reports": reports})
+
+
+@app.get("/ai-models")
+async def list_ai_models():
+    """Trả về danh sách mô hình AI khả dụng bao gồm Gemini (cloud) và các mô hình Ollama ở local."""
+    models = [
+        {"id": "gemini", "name": "Gemini 2.5 Flash", "type": "cloud", "description": "Google Cloud (Khuyến nghị)"}
+    ]
+    try:
+        from llm import OLLAMA_BASE_URL
+        # Gọi API tags của Ollama để lấy các model có sẵn ở máy local
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            for m in data.get("models", []):
+                name = m.get("name", "")
+                # Thêm vào danh sách model local
+                models.append({
+                    "id": name,
+                    "name": name.split(":")[0].capitalize(),
+                    "type": "local",
+                    "description": f"Ollama Local Model ({m.get('details', {}).get('parameter_size', 'N/A')})"
+                })
+    except Exception as e:
+        logger.warning(f"Không thể kết nối tới Ollama tại http://host.docker.internal:11434: {e}")
+        # Nếu lỗi (ví dụ Ollama không chạy), vẫn trả về LLaVA mặc định
+        models.append({"id": "llava", "name": "LLaVA", "type": "local", "description": "Ollama Local (Offline)"})
+    
+    return JSONResponse({"models": models})
 
 
 # ── System Health ───────────────────────────────────────────────

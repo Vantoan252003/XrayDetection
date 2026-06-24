@@ -30,15 +30,17 @@ Bệnh có khả năng cao nhất: {top_disease}
 Hãy giải thích kết quả này bằng tiếng Việt."""
 
 
-def _explain_with_llava(prompt: str, heatmap_bytes: bytes) -> str:
-    """Gọi LLaVA qua Ollama (hỗ trợ Vision)."""
+def _explain_with_ollama(prompt: str, model_name: str, heatmap_bytes: bytes) -> str:
+    """Gọi một mô hình cục bộ qua Ollama (hỗ trợ cả text-only và vision)."""
     payload = {
-        "model": "llava",
+        "model": model_name,
         "prompt": prompt,
         "stream": False
     }
 
-    if heatmap_bytes:
+    # Chỉ đính kèm ảnh nếu là model hỗ trợ vision và có heatmap
+    is_vision = any(kw in model_name.lower() for kw in ["llava", "vision", "bakllava", "minicpm","gemma", "moondream", "llama3.2-vision"])
+    if is_vision and heatmap_bytes:
         heatmap_b64 = base64.b64encode(heatmap_bytes).decode('utf-8')
         payload["images"] = [heatmap_b64]
 
@@ -90,10 +92,12 @@ def explain_results(scores: dict, heatmap_bytes: bytes, top_disease: str, ai_mod
     prompt = _build_prompt(scores, top_disease)
 
     try:
-        if ai_model == "llava":
-            return _explain_with_llava(prompt, heatmap_bytes)
-        else:
+        if ai_model == "gemini":
             return _explain_with_gemini(prompt, heatmap_bytes)
+        else:
+            # Bất kỳ model nào khác gemini sẽ gọi qua Ollama local (e.g. gemma, llava, etc.)
+            return _explain_with_ollama(prompt, ai_model, heatmap_bytes)
     except Exception as e:
         print(f"Lỗi khi gọi AI ({ai_model}): {e}")
         return f"Đã xảy ra lỗi khi tạo lời giải thích bằng AI: {str(e)}"
+

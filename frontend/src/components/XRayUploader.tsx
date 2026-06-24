@@ -2,7 +2,7 @@
 
 import { translateDisease } from "@/utils/disease";
 import ImageSlider from "@/components/ImageSlider";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   UploadCloud, Loader2, AlertCircle,
   CheckCircle2, Cpu, Cloud, FileImage,
@@ -19,14 +19,43 @@ type Result = {
   processing_time_ms?: number;
 };
 
+type AIModel = {
+  id: string;
+  name: string;
+  type: "cloud" | "local";
+  description: string;
+};
+
 export default function XRayUploader() {
-  const [file, setFile]         = useState<File | null>(null);
-  const [preview, setPreview]   = useState<string | null>(null);
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState<Result | null>(null);
-  const [error, setError]       = useState<string | null>(null);
-  const [aiModel, setAiModel]   = useState<"gemini" | "llava">("gemini");
-  const inputRef                 = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<Result | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [aiModel, setAiModel] = useState<string>("gemini");
+  const [models, setModels] = useState<AIModel[]>([
+    { id: "gemini", name: "Gemini 2.5 Flash", type: "cloud", description: "Google Cloud (Khuyến nghị)" },
+    { id: "llava", name: "LLaVA (Local)", type: "local", description: "Ollama Local (Offline)" },
+  ]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/ai-models`;
+        const r = await fetch(url);
+        if (r.ok) {
+          const data = await r.json();
+          if (data.models && data.models.length > 0) {
+            setModels(data.models);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch AI models:", e);
+      }
+    };
+    fetchModels();
+  }, []);
 
   const onFile = (f: File) => {
     if (!f.type.startsWith("image/")) { setError("Vui lòng chọn file hình ảnh hợp lệ."); return; }
@@ -89,7 +118,7 @@ export default function XRayUploader() {
                     <Loader2 className="w-10 h-10 animate-spin mb-2" style={{ color: "var(--indigo-500)" }} />
                     <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Đang phân tích...</p>
                     <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                      {aiModel === "llava" ? "LLaVA Local — ~30-60s" : "Gemini Flash — ~5-15s"}
+                      {aiModel === "gemini" ? "Gemini Flash — ~5-15s" : `Mô hình Local (${models.find(m => m.id === aiModel)?.name || "Ollama"}) — ~30-60s`}
                     </p>
                   </div>
                 )}
@@ -111,32 +140,32 @@ export default function XRayUploader() {
             <div className="chart-card">
               <p className="text-sm font-bold mb-3" style={{ color: "var(--text-primary)" }}>Chọn mô hình AI</p>
               <div className="grid grid-cols-2 gap-3">
-                {[
-                  { id: "gemini" as const, label: "Gemini 2.5 Flash", sub: "Google · Nhanh · Chính xác", icon: Cloud, badge: "Khuyến nghị" },
-                  { id: "llava"  as const, label: "LLaVA (Local)",    sub: "Offline · Riêng tư · Chậm hơn",  icon: Cpu },
-                ].map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => setAiModel(m.id)}
-                    className="flex items-center gap-3 p-4 rounded-xl text-left transition-all"
-                    style={{
-                      border: `2px solid ${aiModel === m.id ? "var(--indigo-400)" : "var(--border-light)"}`,
-                      background: aiModel === m.id ? "var(--indigo-50)" : "var(--bg-card)",
-                    }}
-                  >
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                      style={{ background: aiModel === m.id ? "var(--indigo-100)" : "var(--bg-subtle)" }}>
-                      <m.icon className="w-5 h-5" style={{ color: aiModel === m.id ? "var(--indigo-500)" : "var(--text-muted)" }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{m.label}</p>
-                        {m.badge && <span className="badge badge-indigo text-[10px]">{m.badge}</span>}
+                {models.map(m => {
+                  const IconComponent = m.type === "cloud" ? Cloud : Cpu;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => setAiModel(m.id)}
+                      className="flex items-center gap-3 p-4 rounded-xl text-left transition-all"
+                      style={{
+                        border: `2px solid ${aiModel === m.id ? "var(--indigo-400)" : "var(--border-light)"}`,
+                        background: aiModel === m.id ? "var(--indigo-50)" : "var(--bg-card)",
+                      }}
+                    >
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: aiModel === m.id ? "var(--indigo-100)" : "var(--bg-subtle)" }}>
+                        <IconComponent className="w-5 h-5" style={{ color: aiModel === m.id ? "var(--indigo-500)" : "var(--text-muted)" }} />
                       </div>
-                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>{m.sub}</p>
-                    </div>
-                  </button>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>{m.name}</p>
+                          {m.type === "cloud" && <span className="badge badge-indigo text-[10px]">Khuyến nghị</span>}
+                        </div>
+                        <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{m.description}</p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -218,7 +247,7 @@ export default function XRayUploader() {
                 ) : (
                   <div className="space-y-3">
                     {Object.entries(result.scores)
-                      .filter(([, score]) => score >= 0.75)
+                      .filter(([, score]) => score >= 0.6)
                       .sort(([, a], [, b]) => b - a)
                       .map(([disease, score]) => (
                         <div key={disease}>
@@ -241,9 +270,9 @@ export default function XRayUploader() {
                           </div>
                         </div>
                       ))}
-                    {Object.entries(result.scores).filter(([, score]) => score >= 0.75).length === 0 && (
+                    {Object.entries(result.scores).filter(([, score]) => score >= 0.65).length === 0 && (
                       <p className="text-sm text-center py-2" style={{ color: "var(--text-muted)" }}>
-                        Không có bệnh lý nào vượt quá 75% độ tin cậy.
+                        Không có bệnh lý nào vượt quá 65% độ tin cậy.
                       </p>
                     )}
                   </div>

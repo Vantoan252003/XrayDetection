@@ -7,6 +7,8 @@ torchvision
 scikit-image
 matplotlib
 numpy
+grad-cam
+scipy
 asyncpg
 boto3
 requests
