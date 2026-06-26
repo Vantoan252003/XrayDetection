@@ -52,7 +52,7 @@ async def analyze_single_xray(
     top_disease = max(scores, key=scores.get) if scores else None
     top_score = scores.get(top_disease, 0) if top_disease else 0
     
-    if top_score <= 0.6:
+    if top_score <= 0.7:
         top_disease = None
         is_normal = True
 
@@ -179,8 +179,8 @@ async def analyze_batch_xrays(
         top_disease = max(scores, key=scores.get) if scores else None
         top_score = scores.get(top_disease, 0) if top_disease else 0
         
-        # Chỉ nhận bệnh lý khi score > 0.75 đối với Batch mode
-        if top_score <= 0.75:
+        # Chỉ nhận bệnh lý khi score > 0.7 đối với Batch mode
+        if top_score <= 0.7:
             top_disease = None
             is_normal = True
 

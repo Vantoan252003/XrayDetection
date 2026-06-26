@@ -365,7 +365,7 @@ export default function XRayUploader() {
                 ) : (
                   <div className="space-y-3">
                     {Object.entries(result.scores)
-                      .filter(([, score]) => score >= 0.6)
+                      .filter(([, score]) => score >= 0.7)
                       .sort(([, a], [, b]) => b - a)
                       .map(([disease, score]) => (
                         <div key={disease}>
@@ -388,9 +388,9 @@ export default function XRayUploader() {
                           </div>
                         </div>
                       ))}
-                    {Object.entries(result.scores).filter(([, score]) => score >= 0.65).length === 0 && (
+                    {Object.entries(result.scores).filter(([, score]) => score >= 0.7).length === 0 && (
                       <p className="text-sm text-center py-2" style={{ color: "var(--text-muted)" }}>
-                        Không có bệnh lý nào vượt quá 65% độ tin cậy.
+                        Không có bệnh lý nào vượt quá 70% độ tin cậy.
                       </p>
                     )}
                   </div>

@@ -13,6 +13,7 @@ from database import (
     update_scan_review_status, save_labeled_scan, get_pool
 )
 from services.label_service import save_to_training_set
+from storage import delete_image
 
 router = APIRouter(prefix="/review", tags=["Doctor Review"])
 logger = logging.getLogger(__name__)
@@ -85,41 +86,30 @@ async def correct_scan(scan_id: str, payload: CorrectionReviewPayload):
 
 @router.post("/{scan_id}/reject")
 async def reject_scan(scan_id: str, payload: RejectionPayload):
-    """Bác sĩ bác bỏ ảnh quét (do mờ, lỗi hoặc sai lệch hoàn toàn)."""
+    """Bác sĩ bác bỏ ảnh quét (do mờ, lỗi hoặc sai lệch hoàn toàn) và xóa khỏi DB, MinIO."""
     try:
-        # Lấy pool để làm việc trực tiếp nếu cần thiết
         pool = await get_pool()
-        scan_row = await pool.fetchrow("SELECT image_key FROM scans WHERE id = $1", uuid.UUID(scan_id))
+        scan_row = await pool.fetchrow("SELECT image_key, heatmap_key FROM scans WHERE id = $1", uuid.UUID(scan_id))
         
         if not scan_row:
             raise HTTPException(status_code=404, detail="Scan not found")
             
-        # Không copy ảnh sang training set, chỉ lưu vào hoặc cập nhật labeled_scans với trạng thái rejected
-        existing_row = await pool.fetchrow("SELECT id FROM labeled_scans WHERE scan_id = $1", uuid.UUID(scan_id))
-        if existing_row:
-            await pool.execute(
-                """UPDATE labeled_scans
-                   SET verified_labels = '{}', review_status = 'rejected', reviewed_by = 'doctor', reviewed_at = NOW(), added_to_training = False
-                   WHERE scan_id = $1""",
-                uuid.UUID(scan_id)
-            )
-        else:
-            await save_labeled_scan(
-                scan_id=scan_id,
-                image_key=scan_row["image_key"],
-                verified_labels={},  # Rỗng vì bị loại bỏ
-                review_status="rejected",
-                reviewed_by="doctor",
-                added_to_training=False
-            )
+        # 1. Xóa các file tương ứng trong MinIO
+        if scan_row["image_key"]:
+            delete_image(scan_row["image_key"])
+        if scan_row["heatmap_key"]:
+            delete_image(scan_row["heatmap_key"])
+            
+        # 2. Xóa triệt để các dữ liệu liên quan trong DB
+        await pool.execute("DELETE FROM labeled_scans WHERE scan_id = $1", uuid.UUID(scan_id))
+        await pool.execute("DELETE FROM scan_events WHERE scan_id = $1", uuid.UUID(scan_id))
+        await pool.execute("DELETE FROM scans WHERE id = $1", uuid.UUID(scan_id))
         
-        # Cập nhật scans review_status = 'done'
-        await update_scan_review_status(scan_id, "done")
-        return {"status": "success", "message": "Scan rejected"}
+        return {"status": "success", "message": "Scan rejected and deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error rejecting scan {scan_id}: {e}")
+        logger.error(f"Error rejecting/deleting scan {scan_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/timeout-check")

@@ -14,6 +14,7 @@ type Scan = {
   scores: Record<string, number>;
   review_deadline?: string;
   patient_id?: string;
+  is_normal?: boolean;
 };
 
 export default function ReviewPage() {
@@ -90,9 +91,9 @@ export default function ReviewPage() {
           if (checked) initialLabels[disease] = true;
         });
       } else {
-        // Nếu là tab chưa duyệt, tự động tích nếu xác suất AI > 60% (0.6)
+        // Nếu là tab chưa duyệt, tự động tích nếu xác suất AI > 70% (0.7)
         Object.entries(scan.scores).forEach(([disease, score]) => {
-          if (score > 0.6) {
+          if (score > 0.7) {
             initialLabels[disease] = true;
           }
         });
@@ -561,49 +562,50 @@ export default function ReviewPage() {
                     Phán đoán của AI
                   </p>
                   <div className="space-y-2">
-                    {Object.entries(activeScan.scores)
-                      .filter(([, score]) => score > 0.4)
-                      .sort(([, a], [, b]) => b - a)
-                      .map(([disease, score]) => {
-                        // Bác sĩ đã bỏ tích hoặc không tích bệnh này
-                        const doctorApproved = verifiedLabels[disease] === true;
-                        // Áp dụng gạch ngang và giảm độ mờ khi bác sĩ không chọn bệnh lý này
-                        const showStrike = !doctorApproved;
-                        const isUnchecked = !doctorApproved;
-                        return (
-                          <div key={disease} className="text-xs animate-fadeIn">
-                            <div className="flex justify-between font-semibold mb-0.5">
-                              <span style={{
-                                color: showStrike ? "var(--text-muted)" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-600)" : "var(--text-secondary)",
-                                textDecoration: showStrike ? "line-through" : "none",
-                                opacity: isUnchecked ? 0.5 : 1,
-                              }}>
-                                {showStrike && "✗ "}{translateDisease(disease)}
-                                {doctorApproved && activeTab === "reviewed" && " ✓"}
-                              </span>
-                              <span style={{
-                                color: showStrike ? "var(--text-muted)" : "var(--indigo-600)",
-                                opacity: isUnchecked ? 0.4 : 1,
-                              }}>{(score * 100).toFixed(1)}%</span>
+                    {!activeScan.is_normal && Object.entries(activeScan.scores).filter(([, score]) => score > 0.7).length > 0 ? (
+                      Object.entries(activeScan.scores)
+                        .filter(([, score]) => score > 0.7)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([disease, score]) => {
+                          // Bác sĩ đã bỏ tích hoặc không tích bệnh này
+                          const doctorApproved = verifiedLabels[disease] === true;
+                          // Áp dụng gạch ngang và giảm độ mờ khi bác sĩ không chọn bệnh lý này
+                          const showStrike = !doctorApproved;
+                          const isUnchecked = !doctorApproved;
+                          return (
+                            <div key={disease} className="text-xs animate-fadeIn">
+                              <div className="flex justify-between font-semibold mb-0.5">
+                                <span style={{
+                                  color: showStrike ? "var(--text-muted)" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-600)" : "var(--text-secondary)",
+                                  textDecoration: showStrike ? "line-through" : "none",
+                                  opacity: isUnchecked ? 0.5 : 1,
+                                }}>
+                                  {showStrike && "✗ "}{translateDisease(disease)}
+                                  {doctorApproved && activeTab === "reviewed" && " ✓"}
+                                </span>
+                                <span style={{
+                                  color: showStrike ? "var(--text-muted)" : "var(--indigo-600)",
+                                  opacity: isUnchecked ? 0.4 : 1,
+                                }}>{(score * 100).toFixed(1)}%</span>
+                              </div>
+                              <div className="progress-bar">
+                                <div className="progress-bar-fill" style={{
+                                  width: `${score * 100}%`,
+                                  background: showStrike ? "#cbd5e1" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-500)" : score > 0.75 ? "var(--rose-500)" : "var(--indigo-500)",
+                                  opacity: isUnchecked ? 0.3 : 1,
+                                }} />
+                              </div>
+                              {showStrike && (
+                                <p className="text-[10px] text-slate-400 mt-0.5 italic">
+                                  {activeTab === "reviewed" ? "Bác sĩ xác nhận: Không phải bệnh này" : "Chưa xác nhận bệnh này"}
+                                </p>
+                              )}
                             </div>
-                            <div className="progress-bar">
-                              <div className="progress-bar-fill" style={{
-                                width: `${score * 100}%`,
-                                background: showStrike ? "#cbd5e1" : doctorApproved && activeTab === "reviewed" ? "var(--emerald-500)" : score > 0.75 ? "var(--rose-500)" : "var(--indigo-500)",
-                                opacity: isUnchecked ? 0.3 : 1,
-                              }} />
-                            </div>
-                            {showStrike && (
-                              <p className="text-[10px] text-slate-400 mt-0.5 italic">
-                                {activeTab === "reviewed" ? "Bác sĩ xác nhận: Không phải bệnh này" : "Chưa xác nhận bệnh này"}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    {Object.values(activeScan.scores).every(score => score <= 0.4) && (
+                          );
+                        })
+                    ) : (
                       <p className="text-xs py-4 text-center italic" style={{ color: "var(--text-muted)" }}>
-                        AI chẩn đoán phổi hoàn toàn bình thường (tất cả chỉ số &lt; 40%).
+                        AI chẩn đoán phổi hoàn toàn bình thường.
                       </p>
                     )}
                   </div>

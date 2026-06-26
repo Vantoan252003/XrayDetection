@@ -56,6 +56,15 @@ def upload_image(key: str, data: bytes, content_type: str = "image/jpeg", taggin
     s3.put_object(**kwargs)
     return key
 
+def delete_image(key: str, bucket: str = BUCKET) -> bool:
+    """Xóa ảnh từ MinIO bucket."""
+    try:
+        s3.delete_object(Bucket=bucket, Key=key)
+        return True
+    except Exception as e:
+        print(f"Lỗi xóa file {key} từ bucket {bucket}: {e}")
+        return False
+
 def copy_image(src_key: str, dest_key: str, src_bucket: str = BUCKET, dest_bucket: str = BUCKET_TRAINING) -> str:
     """Copy ảnh từ bucket này sang bucket khác."""
     s3.copy_object(
