@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 import io
 import torch
 import torchxrayvision as xrv
-THRESHOLD = 0.6  # chỉ report bệnh có confidence > 75%
+THRESHOLD = 0.6  # chỉ report bệnh có confidence > 60%
 
 
 def predict(img_tensor: torch.Tensor, model) -> dict:

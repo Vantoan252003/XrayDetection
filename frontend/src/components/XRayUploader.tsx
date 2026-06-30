@@ -19,6 +19,8 @@ type Result = {
   heatmap_url: string | null;
   explanation: string;
   processing_time_ms?: number;
+  icd_code?: string | null;
+  icd_group?: string | null;
 };
 
 type AIModel = {
@@ -34,7 +36,7 @@ export default function XRayUploader() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [aiModel, setAiModel] = useState<string>("gemini");
+  const [aiModel, setAiModel] = useState<string>("medgemma1.5:latest");
   const [modelVersion, setModelVersion] = useState<string>("");
   const [skipLlm, setSkipLlm] = useState(false);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
@@ -45,7 +47,7 @@ export default function XRayUploader() {
 
   const [models, setModels] = useState<AIModel[]>([
     { id: "gemini", name: "Gemini 2.5 Flash", type: "cloud", description: "Google Cloud (Khuyến nghị)" },
-    { id: "llava", name: "LLaVA (Local)", type: "local", description: "Ollama Local (Offline)" },
+    { id: "medgemma1.5:latest", name: "Medgemma1.5", type: "local", description: "Ollama Local (Offline)" },
   ]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -353,6 +355,21 @@ export default function XRayUploader() {
                   <FileImage className="w-4 h-4" style={{ color: "var(--indigo-500)" }} />
                   Dự đoán bệnh lý
                 </h3>
+
+                {result.icd_code && (
+                  <div className="p-3 mb-4 rounded-xl text-xs flex flex-col gap-1 animate-fadeIn"
+                    style={{ background: "var(--bg-subtle)", border: "1px solid var(--border-light)" }}>
+                    <p className="font-semibold text-slate-400" style={{ textTransform: "uppercase", fontSize: "10px", letterSpacing: "0.05em" }}>
+                      Phân loại ICD-10
+                    </p>
+                    <p style={{ color: "var(--text-primary)" }} className="flex items-center gap-2 mt-0.5">
+                      <span className="font-extrabold text-indigo-600 px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-100 tabular-nums">
+                        {result.icd_code}
+                      </span>
+                      <span className="font-semibold text-sm">{result.icd_group || "Chưa xác định nhóm bệnh"}</span>
+                    </p>
+                  </div>
+                )}
 
                 {result.is_normal || !Object.keys(result.scores).length ? (
                   <div className="flex items-center gap-3 p-4 rounded-xl"

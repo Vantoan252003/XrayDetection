@@ -1,3 +1,16 @@
 .env
 
 airflow/logs/
+
+# Models and large files
+backend/models/
+*.safetensors
+*.bin
+*.pt
+*.gguf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

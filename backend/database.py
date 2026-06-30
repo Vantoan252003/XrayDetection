@@ -23,18 +23,18 @@ async def save_scan(scan_id, image_key, heatmap_key,
                     patient_id=None, processing_time_ms=0,
                     source="web", region="default", ai_model_used="gemini",
                     review_status="none", review_deadline=None, ai_model_version="densenet121-res224-all",
-                    status="completed"):
+                    status="completed", icd_code=None, icd_group=None):
     pool = await get_pool()
     await pool.execute(
         """INSERT INTO scans
            (id, image_key, heatmap_key, scores, top_disease, is_normal, explanation,
             patient_id, processing_time_ms, source, region, ai_model_used, status,
-            review_status, review_deadline, ai_model_version)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+            review_status, review_deadline, ai_model_version, icd_code, icd_group)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)""",
         uuid.UUID(scan_id), image_key, heatmap_key,
         json.dumps(scores), top_disease, is_normal, explanation,
         patient_id, processing_time_ms, source, region, ai_model_used, status,
-        review_status, review_deadline, ai_model_version,
+        review_status, review_deadline, ai_model_version, icd_code, icd_group
     )
 
 def _parse_row_scores(row) -> dict | None:

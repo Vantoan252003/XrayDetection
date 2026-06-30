@@ -214,3 +214,18 @@ async def get_spark_reports(pool, report_type: str = None, limit: int = 10) -> l
             d["report_data"] = json.loads(d["report_data"])
         result.append(d)
     return result
+
+
+async def get_icd_distribution(pool) -> list[dict]:
+    """Thống kê tần suất và tỷ lệ phần trăm theo từng nhóm bệnh ICD-10."""
+    rows = await pool.fetch("""
+        SELECT
+            COALESCE(icd_group, 'Không xác định') as icd_group,
+            COUNT(*) as count,
+            ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER(), 0), 1)::float as percentage
+        FROM scans
+        WHERE icd_group IS NOT NULL AND icd_group != ''
+        GROUP BY icd_group
+        ORDER BY count DESC
+    """)
+    return [dict(r) for r in rows]

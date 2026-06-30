@@ -15,6 +15,8 @@ type Scan = {
   review_deadline?: string;
   patient_id?: string;
   is_normal?: boolean;
+  icd_code?: string | null;
+  icd_group?: string | null;
 };
 
 export default function ReviewPage() {
@@ -558,6 +560,21 @@ export default function ReviewPage() {
                 </div>
 
                 <div className="space-y-4">
+                  {activeScan.icd_code && (
+                    <div className="p-3 rounded-xl text-xs flex flex-col gap-1 border"
+                      style={{ background: "var(--bg-card)", borderColor: "var(--border-light)" }}>
+                      <p className="font-semibold text-slate-400" style={{ textTransform: "uppercase", fontSize: "10px", letterSpacing: "0.05em" }}>
+                        Phân loại ICD-10 chuẩn y khoa
+                      </p>
+                      <p style={{ color: "var(--text-primary)" }} className="flex items-center gap-2 mt-0.5">
+                        <span className="font-extrabold text-indigo-600 px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-100 tabular-nums">
+                          {activeScan.icd_code}
+                        </span>
+                        <span className="font-semibold text-sm">{activeScan.icd_group || "Chưa xác định nhóm bệnh"}</span>
+                      </p>
+                    </div>
+                  )}
+
                   <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
                     Phán đoán của AI
                   </p>

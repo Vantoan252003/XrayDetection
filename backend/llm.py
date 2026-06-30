@@ -9,13 +9,43 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:1143
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.5-flash"
 
+import re
+
 SYSTEM_PROMPT = """Bạn là trợ lý y khoa hỗ trợ đọc ảnh X-ray. Nhiệm vụ của bạn là:
 - Trả lời bằng tiếng Việt, ngôn ngữ dễ hiểu và trình bày theo đúng định dạng sau:
 1. Dấu hiệu bất thường nổi bật: (Mô tả chi tiết những gì phát hiện được trên ảnh)
 2. Ý nghĩa bệnh lý: (Đánh giá mức độ và nguyên nhân có thể)
 3. Cách phòng tránh và hướng xử lý: (Khuyến nghị người bệnh nên làm gì tiếp theo)
+4. Mã ICD-10 và Nhóm bệnh: [Mã ICD-10] - [Tên nhóm bệnh ICD-10] (Ví dụ: J18.9 - Bệnh hệ hô hấp (J00-J99))
 - Luôn có câu nhắc nhở ở cuối: "Lưu ý: Đây chỉ là kết quả phân tích sơ bộ bằng AI, không thể thay thế chẩn đoán y khoa chính thức. Vui lòng tham khảo ý kiến bác sĩ."
 """
+
+def parse_icd_from_text(explanation: str) -> tuple[str | None, str | None]:
+    """Trích xuất mã ICD-10 và tên nhóm bệnh từ văn bản giải thích của LLM.
+    
+    Định dạng kỳ vọng:
+    4. Mã ICD-10 và Nhóm bệnh: J18.9 - Bệnh hệ hô hấp (J00-J99)
+    """
+    if not explanation:
+        return None, None
+        
+    # Tìm dòng chứa thông tin ICD-10
+    match = re.search(
+        r'(?:4\.\s*)?Mã\s*ICD-10\s*(?:và\s*Nhóm\s*bệnh)?\s*:\s*([A-Z][0-9][0-9A-Z\.]*)\s*-\s*([^\n\r]+)',
+        explanation,
+        re.IGNORECASE
+    )
+    if match:
+        icd_code = match.group(1).strip()
+        icd_group = match.group(2).strip()
+        return icd_code, icd_group
+        
+    # Thử tìm kiếm đơn giản hơn
+    match_simple = re.search(r'ICD-10\s*:\s*([A-Z][0-9][0-9A-Z\.]*)', explanation, re.IGNORECASE)
+    if match_simple:
+        return match_simple.group(1).strip(), None
+        
+    return None, None
 
 def _build_prompt(scores: dict, top_disease: str) -> str:
     findings_text = "\n".join(
@@ -42,7 +72,7 @@ def _explain_with_ollama(prompt: str, model_name: str, heatmap_bytes: bytes) -> 
     }
 
     # Chỉ đính kèm ảnh nếu là model hỗ trợ vision và có heatmap
-    is_vision = any(kw in model_name.lower() for kw in ["llava", "vision", "bakllava", "minicpm","gemma", "moondream", "llama3.2-vision"])
+    is_vision = any(kw in model_name.lower() for kw in ["llava", "vision", "bakllava", "minicpm", "moondream", "llama3.2-vision", "paligemma"])
     if is_vision and heatmap_bytes:
         heatmap_b64 = base64.b64encode(heatmap_bytes).decode('utf-8')
         payload["images"] = [heatmap_b64]

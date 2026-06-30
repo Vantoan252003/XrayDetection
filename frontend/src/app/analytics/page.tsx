@@ -25,24 +25,27 @@ type DailyRecord = {
 export default function AnalyticsPage() {
   const [period, setPeriod]           = useState<"7d" | "30d">("30d");
   const [granularity, setGranularity] = useState<"hour" | "day">("day");
-  const [tab, setTab]                 = useState<"trend" | "disease" | "daily">("trend");
+  const [tab, setTab]                 = useState<"trend" | "disease" | "icd" | "daily">("trend");
   const [daily, setDaily]             = useState<DailyRecord[]>([]);
   const [timeline, setTimeline]       = useState<{ time: string; total: number; normal: number; abnormal: number }[]>([]);
   const [diseases, setDiseases]       = useState<{ disease: string; count: number; percentage: number }[]>([]);
+  const [icdData, setIcdData]         = useState<{ icd_group: string; count: number; percentage: number }[]>([]);
   const [loading, setLoading]         = useState(true);
 
   const fetch_ = useCallback(async () => {
     setLoading(true);
     const days = period === "7d" ? 7 : 30;
     try {
-      const [dRes, tRes, disRes] = await Promise.all([
+      const [dRes, tRes, disRes, icdRes] = await Promise.all([
         fetch(`${API}/analytics/daily?days=${days}`),
         fetch(`${API}/analytics/timeline?period=${period}&granularity=${granularity}`),
         fetch(`${API}/analytics/diseases`),
+        fetch(`${API}/analytics/icd`),
       ]);
       if (dRes.ok)   { const d = await dRes.json();   setDaily(d.daily || []); }
       if (tRes.ok)   { const t = await tRes.json();   setTimeline(t.timeline || []); }
       if (disRes.ok) { const d = await disRes.json(); setDiseases(d.diseases || []); }
+      if (icdRes.ok) { const d = await icdRes.json(); setIcdData(d.icd_distribution || []); }
     } catch {}
     setLoading(false);
   }, [period, granularity]);
@@ -192,9 +195,9 @@ export default function AnalyticsPage() {
             {/* Tab Pills */}
             <div className="flex items-center gap-2 mb-4">
               <div className="tab-pill">
-                {(["trend", "disease", "daily"] as const).map(t => (
+                {(["trend", "disease", "icd", "daily"] as const).map(t => (
                   <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-                    {t === "trend" ? "📈 Xu hướng" : t === "disease" ? "🦠 Bệnh lý" : "📋 Nhật ký"}
+                    {t === "trend" ? "📈 Xu hướng" : t === "disease" ? "🦠 Bệnh lý" : t === "icd" ? "📋 Nhóm ICD-10" : "📋 Nhật ký"}
                   </button>
                 ))}
               </div>
@@ -223,6 +226,79 @@ export default function AnalyticsPage() {
                     Phân bố tỉ lệ
                   </h3>
                   <DiseaseChart data={diseases} size={200} />
+                </div>
+              </div>
+            )}
+
+            {tab === "icd" && (
+              <div className="dashboard-grid-2 animate-fadeIn">
+                <div className="chart-card">
+                  <h3 className="text-sm font-bold mb-4" style={{ color: "var(--text-primary)" }}>
+                    📋 Phân bố theo Nhóm bệnh ICD-10
+                  </h3>
+                  
+                  {!icdData.length ? (
+                    <div className="flex items-center justify-center py-10" style={{ color: "var(--text-muted)" }}>
+                      <p className="text-sm">Chưa có dữ liệu phân loại ICD-10</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {icdData.slice(0, 10).map((d, i) => {
+                        const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#f43f5e", "#0ea5e9", "#8b5cf6", "#14b8a6", "#ef4444", "#ec4899", "#84cc16"];
+                        const maxCount = Math.max(...icdData.map(item => item.count), 1);
+                        return (
+                          <div key={d.icd_group} className="group">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
+                                <span className="text-sm font-medium truncate max-w-[240px]" style={{ color: "var(--text-primary)" }} title={d.icd_group}>
+                                  {d.icd_group}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-sm font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>
+                                  {d.count.toLocaleString("vi-VN")} ca
+                                </span>
+                                <span className="text-xs font-semibold w-12 text-right tabular-nums" style={{ color: COLORS[i % COLORS.length] }}>
+                                  {d.percentage}%
+                                </span>
+                              </div>
+                            </div>
+                            <div className="progress-bar">
+                              <div
+                                className="progress-bar-fill"
+                                style={{
+                                  width: `${(d.count / maxCount) * 100}%`,
+                                  background: COLORS[i % COLORS.length],
+                                  opacity: 0.85,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="chart-card flex flex-col items-center justify-center">
+                  <h3 className="text-sm font-bold mb-4 self-start" style={{ color: "var(--text-primary)" }}>
+                    Tỷ lệ phần trăm nhóm bệnh
+                  </h3>
+                  {!icdData.length ? (
+                    <div className="flex items-center justify-center py-10" style={{ color: "var(--text-muted)" }}>
+                      <p className="text-sm">Chưa có dữ liệu</p>
+                    </div>
+                  ) : (
+                    <DiseaseChart
+                      data={icdData.map(d => ({
+                        disease: d.icd_group,
+                        count: d.count,
+                        percentage: d.percentage
+                      }))}
+                      size={200}
+                    />
+                  )}
                 </div>
               </div>
             )}

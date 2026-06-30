@@ -8,7 +8,8 @@ import logging
 from utils import preprocess_xray
 from gradcam import predict, generate_heatmap
 from xray_model import model_manager
-from llm import explain_results
+from llm import explain_results, parse_icd_from_text
+from modules.icd_mapping import get_default_icd
 from storage import upload_image
 from database import save_scan
 from kafka_producer import publish_scan_event
@@ -24,6 +25,7 @@ async def analyze_single_xray(
     source: str = "web",
     model_version: str | None = None,
     skip_llm: bool = False,
+    analysis_type: str = "lung",
 ) -> dict:
     scan_id = str(uuid.uuid4())
     start_time = time.time()
@@ -39,7 +41,9 @@ async def analyze_single_xray(
     # Publish scan.processing event
     await publish_scan_event("scan.processing", scan_id, {})
 
-    # Lấy model theo version chỉ định
+    heatmap_bytes = b""
+
+    # ── Chạy TorchXRayVision phổi ──
     loaded_model = model_manager.get_model(model_version)
     target_res = getattr(loaded_model, "input_resolution", 224)
 
@@ -57,25 +61,21 @@ async def analyze_single_xray(
         is_normal = True
 
     # Bước 3: Grad-CAM
-    # Chạy sync trong ThreadPool để không block async loop
-    heatmap_bytes = b""
     if top_disease:
         heatmap_bytes = await asyncio.to_thread(
             generate_heatmap, img_tensor, top_disease, file_bytes, loaded_model
         )
 
-    # Bước 4: Upload ảnh gốc + heatmap lên MinIO kèm Auto-tagging (Tính năng 1)
+    # Bước 4: Upload ảnh gốc + heatmap lên MinIO kèm Auto-tagging
     image_key = f"originals/{scan_id}.jpg"
     heatmap_key = f"heatmaps/{scan_id}.png" if heatmap_bytes else ""
     
-    # Chuẩn bị tags
     tagging = {
         "top_disease": top_disease or "Normal",
         "is_normal": str(is_normal).lower(),
         "scan_id": scan_id
     }
     
-    # Upload gốc kèm tag
     await asyncio.to_thread(
         upload_image, image_key, file_bytes, content_type=content_type, tagging=tagging
     )
@@ -83,6 +83,13 @@ async def analyze_single_xray(
         await asyncio.to_thread(
             upload_image, heatmap_key, heatmap_bytes, content_type="image/png"
         )
+
+    # Ánh xạ ICD-10 mặc định
+    icd_code, icd_group = None, None
+    if is_normal:
+        icd_code, icd_group = get_default_icd("Normal")
+    elif top_disease:
+        icd_code, icd_group = get_default_icd(top_disease)
 
     # Bước 5: AI giải thích
     explanation = "Không phát hiện dấu hiệu bất thường rõ ràng nào trên ảnh X-quang này."
@@ -93,6 +100,11 @@ async def analyze_single_xray(
             explanation = await asyncio.to_thread(
                 explain_results, scores, heatmap_bytes, top_disease, ai_model
             )
+            parsed_code, parsed_group = parse_icd_from_text(explanation)
+            if parsed_code:
+                icd_code = parsed_code
+            if parsed_group:
+                icd_group = parsed_group
 
     # Calculate processing time
     processing_time_ms = int((time.time() - start_time) * 1000)
@@ -111,9 +123,11 @@ async def analyze_single_xray(
         processing_time_ms=processing_time_ms,
         source=source,
         ai_model_used=ai_model,
-        review_status="pending", # Single scan tự động vào danh sách chờ duyệt
+        review_status="pending",
         review_deadline=None,
         ai_model_version=actual_model_version,
+        icd_code=icd_code,
+        icd_group=icd_group,
     )
 
     # Bước 7: Publish scan.completed event to Kafka
@@ -124,7 +138,9 @@ async def analyze_single_xray(
         "scores": scores,
         "source": source,
         "patient_id": patient_id,
-        "ai_model_version": actual_model_version
+        "ai_model_version": actual_model_version,
+        "icd_code": icd_code,
+        "icd_group": icd_group,
     })
 
     # Bước 8: Trả về
@@ -137,7 +153,9 @@ async def analyze_single_xray(
         "heatmap_url": f"http://localhost:8000/images/{heatmap_key}" if heatmap_bytes else None,
         "explanation": explanation,
         "processing_time_ms": processing_time_ms,
-        "ai_model_version": actual_model_version
+        "ai_model_version": actual_model_version,
+        "icd_code": icd_code,
+        "icd_group": icd_group,
     }
 
 async def analyze_batch_xrays(
@@ -212,6 +230,13 @@ async def analyze_batch_xrays(
         # Bỏ qua LLM report trong batch mode để tránh chi phí & chậm trễ
         explanation = "Kết quả đang chờ bác sĩ xác nhận. Báo cáo chi tiết sẽ được tạo sau."
 
+        # Ánh xạ ICD-10 mặc định từ top_disease trong batch mode
+        b_icd_code, b_icd_group = None, None
+        if is_normal:
+            b_icd_code, b_icd_group = get_default_icd("Normal")
+        elif top_disease:
+            b_icd_code, b_icd_group = get_default_icd(top_disease)
+
         processing_time_ms = int((time.time() - start_time) * 1000)
 
         # Bước 6: Lưu vào PostgreSQL với review_status = 'pending'
@@ -230,7 +255,9 @@ async def analyze_batch_xrays(
             review_status="pending",
             review_deadline=review_deadline,
             ai_model_version=actual_model_version,
-            status="completed"
+            status="completed",
+            icd_code=b_icd_code,
+            icd_group=b_icd_group,
         )
 
         # Bước 7: Publish scan.completed event to Kafka
@@ -242,7 +269,9 @@ async def analyze_batch_xrays(
             "source": source,
             "patient_id": patient_id,
             "ai_model_version": actual_model_version,
-            "review_status": "pending"
+            "review_status": "pending",
+            "icd_code": b_icd_code,
+            "icd_group": b_icd_group,
         })
 
         return {
@@ -254,7 +283,9 @@ async def analyze_batch_xrays(
             "heatmap_url": f"http://localhost:8000/images/{heatmap_key}" if heatmap_bytes else None,
             "explanation": explanation,
             "processing_time_ms": processing_time_ms,
-            "ai_model_version": actual_model_version
+            "ai_model_version": actual_model_version,
+            "icd_code": b_icd_code,
+            "icd_group": b_icd_group,
         }
 
     # Chạy song song tất cả các files trong batch

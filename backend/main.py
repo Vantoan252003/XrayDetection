@@ -101,6 +101,7 @@ async def analyze_xray(
     source: str = Form("web"),
     model_version: str | None = Form(None),
     skip_llm: bool = Form(False),
+    analysis_type: str = Form("lung"),
 ):
     """Endpoint xử lý phân tích đơn lẻ ảnh X-quang."""
     file_bytes = await file.read()
@@ -114,6 +115,7 @@ async def analyze_xray(
             source=source,
             model_version=model_version,
             skip_llm=skip_llm,
+            analysis_type=analysis_type,
         )
         return JSONResponse(result)
     except Exception as e:
@@ -214,6 +216,14 @@ async def analytics_diseases():
     return JSONResponse({"diseases": diseases})
 
 
+@app.get("/analytics/icd")
+async def analytics_icd():
+    """ICD-10 group distribution details."""
+    pool = await get_pool()
+    icd_distribution = await analytics.get_icd_distribution(pool)
+    return JSONResponse({"icd_distribution": icd_distribution})
+
+
 @app.get("/analytics/hourly")
 async def analytics_hourly(hours: int = Query(default=24, le=168)):
     """Pre-aggregated hourly metrics."""
@@ -272,8 +282,8 @@ async def list_ai_models():
                 })
     except Exception as e:
         logger.warning(f"Không thể kết nối tới Ollama tại http://host.docker.internal:11434: {e}")
-        # Nếu lỗi (ví dụ Ollama không chạy), vẫn trả về LLaVA mặc định
-        models.append({"id": "llava", "name": "LLaVA", "type": "local", "description": "Ollama Local (Offline)"})
+        # Nếu lỗi (ví dụ Ollama không chạy), vẫn trả về medgemma1.5 mặc định
+        models.append({"id": "medgemma1.5:latest", "name": "Medgemma1.5", "type": "local", "description": "Ollama Local (Offline)"})
     
     return JSONResponse({"models": models})
 

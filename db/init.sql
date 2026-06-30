@@ -19,6 +19,10 @@ CREATE TABLE scans (
     -- Giải thích từ AI
     explanation       TEXT,
 
+    -- ICD-10 Classification
+    icd_code          TEXT,
+    icd_group         TEXT,
+
     -- Metadata
     patient_id        TEXT,
     notes             TEXT,
